@@ -33,28 +33,40 @@ async def login(request: Request, response: Response):
             config.CREDENTIALS_PATH.unlink()
     except OSError:
         pass
+    # Detect HTTPS behind reverse proxies (Render/nginx) — a wrong Secure flag
+    # makes the browser drop the cookie and every later call returns 401.
+    xf_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    secure = xf_proto == "https" or request.url.scheme == "https"
     response.set_cookie(
         "sfg_session", token,
         max_age=12 * 3600,
         httponly=True,
         samesite="lax",
-        secure=request.url.scheme == "https",
+        secure=secure,
         path="/",
     )
+    # Confirm the cookie round-trips before the SPA treats login as success.
+    response.headers["X-SFG-Session"] = "set"
     return {
         "ok": True,
         "csrf": csrf,
+        "session_verified": True,
         "user": {"id": user["id"], "email": user["email"], "name": user["name"], "role": user["role"]},
     }
 
 
 @router.post("/logout")
 async def logout(request: Request, response: Response):
-    user = require_user(request)
+    # Idempotent: expired/missing session must still clear the cookie so the
+    # client never gets stuck showing UNAUTHORIZED after logout.
     sid = request.cookies.get("sfg_session")
     if sid:
+        sess = db.q1("SELECT * FROM sessions WHERE id = ?", (sid,))
+        if sess is not None:
+            user = db.q1("SELECT * FROM users WHERE id = ?", (sess["user_id"],))
+            if user is not None:
+                db.audit(user["id"], user["email"], "logout", "auth", "", ip=client_ip(request))
         db.qexec("DELETE FROM sessions WHERE id = ?", (sid,))
-        db.audit(user["id"], user["email"], "logout", "auth", "", ip=client_ip(request))
     response.delete_cookie("sfg_session", path="/")
     return {"ok": True}
 

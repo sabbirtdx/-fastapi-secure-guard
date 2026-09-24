@@ -60,6 +60,14 @@ def get_session(session_id: str | None) -> dict | None:
     if row["expires_at"] < db.utcnow():
         db.qexec("DELETE FROM sessions WHERE id = ?", (session_id,))
         return None
+    # Sliding expiration: active use keeps the session alive (full TTL from
+    # last touch). Prevents mid-work UNAUTHORIZED after idle page use.
+    new_exp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + SESSION_TTL))
+    if new_exp > row["expires_at"]:
+        db.qexec("UPDATE sessions SET expires_at=? WHERE id=?", (new_exp, session_id))
+        row = db.q1("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        if row is None:
+            return None
     return dict(row)
 
 
@@ -79,7 +87,10 @@ def get_current_user(request: Request) -> dict | None:
 def require_user(request: Request) -> dict:
     user = get_current_user(request)
     if user is None:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required."})
+        raise HTTPException(status_code=401, detail={
+            "code": "UNAUTHORIZED",
+            "message": "Your session has expired or is invalid. Please sign in again.",
+        })
     return user
 
 

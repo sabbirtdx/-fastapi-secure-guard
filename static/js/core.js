@@ -84,6 +84,16 @@ const I = {
 };
 
 /* ---------------- API client ---------------- */
+function forceLogin(message) {
+  SFG.user = null;
+  SFG.csrf = "";
+  if (message) {
+    try { sessionStorage.setItem("sfg_auth_msg", message); } catch (e) { }
+  }
+  if (typeof loginPage === "function") loginPage();
+  if (location.hash !== "#/login") location.hash = "#/login";
+}
+
 async function api(method, path, body, opts = {}) {
   const headers = { };
   const isForm = body instanceof FormData;
@@ -101,6 +111,13 @@ async function api(method, path, body, opts = {}) {
     data = await res.json().catch(() => null);
   } else if (!opts.raw) {
     data = { _nonjson: true };
+  }
+  if (res.status === 401 && !opts.allow401) {
+    forceLogin("Session expired or invalid. Please sign in again.");
+    const err = new Error("Your session has expired or is invalid. Please sign in again.");
+    err.code = "UNAUTHORIZED";
+    err.status = 401;
+    throw err;
   }
   if (!res.ok) {
     const detail = data && data.detail ? data.detail : (data && data.error ? data.error : {});
@@ -229,14 +246,13 @@ async function router() {
     content.innerHTML = (out && out.html) || "";
     if (out && out.onReady) out.onReady();
   } catch (e) {
-    const back = e.status === 401
-      ? `<button class="btn" id="reloginBtn">Sign in again</button>`
-      : `<button class="btn" onclick="location.hash='#/dashboard'">Back to dashboard</button>`;
-    content.innerHTML = `<div class="card">${errBox(e)}<div style="margin-top:12px">${back}</div></div>`;
-    if (e.status === 401) {
-      const b = qs("#reloginBtn");
-      if (b) b.onclick = () => { SFG.user = null; SFG.csrf = ""; location.hash = "#/login"; loginPage(); };
+    if (e && e.status === 401) {
+      forceLogin("Session expired or invalid. Please sign in again.");
+      return;
     }
+    content.innerHTML = `<div class="card">${errBox(e)}<div style="margin-top:12px">
+      <button class="btn" onclick="location.hash='#/dashboard'">Back to dashboard</button>
+      <button class="btn ghost" onclick="location.reload()">Reload app</button></div></div>`;
   }
 }
 
@@ -303,14 +319,20 @@ function renderShell() {
     qs("#scrim")?.classList.remove("show");
   });
   bind("#logoutBtn", "onclick", async () => {
-    try { await api("POST", "/api/v1/auth/logout"); } catch (e) { }
+    try { await api("POST", "/api/v1/auth/logout", null, { allow401: true }); } catch (e) { }
     SFG.user = null; SFG.csrf = "";
     location.hash = "#/login";
+    loginPage();
   });
 }
 
 /* ---------------- login page ---------------- */
 async function loginPage() {
+  let authMsg = "";
+  try {
+    authMsg = sessionStorage.getItem("sfg_auth_msg") || "";
+    sessionStorage.removeItem("sfg_auth_msg");
+  } catch (e) { }
   const body = `
     <div class="login-wrap">
       <div class="login-card card">
@@ -318,6 +340,7 @@ async function loginPage() {
           <div class="logo">${I.shield}</div>
           <div><div class="name">Secure File Guard</div><div class="sub">License · Protect · Verify</div></div>
         </div>
+        ${authMsg ? `<div class="callout blue" style="margin-bottom:14px">${esc(authMsg)}</div>` : ""}
         <form id="loginForm">
           <label class="f" for="le">Email</label>
           <input class="input" id="le" name="email" type="email" required autocomplete="username" value="">
@@ -338,10 +361,17 @@ async function loginPage() {
     try {
       const data = await api("POST", "/api/v1/auth/login", {
         email: qsT("#le")?.value || "", password: qsT("#lp")?.value || "",
-      });
-      SFG.user = data.user; SFG.csrf = data.csrf;
+      }, { allow401: true });
+      // Prove the session cookie round-trips before entering the app.
+      try {
+        const me = await api("GET", "/api/v1/auth/me");
+        SFG.user = me.user; SFG.csrf = me.csrf;
+      } catch (meErr) {
+        SFG.user = data.user; SFG.csrf = data.csrf;
+      }
       renderShell();
-      location.hash = "#/dashboard";
+      const dest = (location.hash && location.hash !== "#/login") ? location.hash : "#/dashboard";
+      location.hash = dest;
       router();
     } catch (err) {
       const errEl = qsT("#loginErr");
@@ -361,7 +391,7 @@ async function boot() {
     console.error("SFG page modules failed to load. Missing:", missing, "Registered:", Object.keys(SFG.pages));
   }
   try {
-    const me = await api("GET", "/api/v1/auth/me");
+    const me = await api("GET", "/api/v1/auth/me", null, { allow401: true });
     SFG.user = me.user; SFG.csrf = me.csrf;
   } catch (e) {
     SFG.user = null; SFG.csrf = "";

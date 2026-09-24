@@ -111,7 +111,23 @@ def _restore_rows(data: dict, bundle: dict, actor: dict) -> dict:
                                r["created_at"], r["updated_at"], r.get("archived_at")))
                     n += 1
             elif table == "project_files":
+                # Metadata-only restore: skip index rows whose source files are
+                # not on disk (Render free disk wipe). Prevents FileNotFoundError
+                # on the next build until the ZIP is re-uploaded.
+                src_root = None
+                try:
+                    from .. import config as _cfg
+                    src_root = _cfg.PROJECTS_DIR
+                except Exception:
+                    src_root = None
                 for r in rows:
+                    if src_root is not None:
+                        fpath = src_root / r["project_id"] / "source" / r["relpath"]
+                        try:
+                            if not fpath.is_file():
+                                continue
+                        except OSError:
+                            continue
                     c.execute("INSERT OR IGNORE INTO project_files (project_id, relpath, size, sha256, kind,"
                               " sensitive, secret_count, indexed_at) VALUES (?,?,?,?,?,?,?,?)",
                               (r["project_id"], r["relpath"], r["size"], r["sha256"], r["kind"],

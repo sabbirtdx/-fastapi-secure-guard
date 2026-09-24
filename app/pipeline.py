@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import re
@@ -110,6 +111,13 @@ def run_build(project_id: str, build_id: str, version: str, opts: dict,
         _emit(build_id, e.stage, "failed", str(e))
         db.audit(user["id"], user["email"], "build_failed", "build", build_id,
                  result="failed", detail=str(e)[:300], ip="")
+    except FileNotFoundError as e:
+        msg = (f"Workspace file missing: {getattr(e, 'filename', None) or e}. "
+               "Re-upload the project ZIP (backup restore does not include source files), then rebuild.")
+        _set_status(build_id, "failed", error=msg)
+        _emit(build_id, 2, "failed", msg)
+        db.audit(user["id"], user["email"], "build_failed", "build", build_id,
+                 result="failed", detail=f"missing file: {e}", ip="")
     except Exception as e:  # unexpected
         _set_status(build_id, "failed", error=f"Unexpected error: {e.__class__.__name__}: {e}")
         db.audit(user["id"], user["email"], "build_failed", "build", build_id,
@@ -185,11 +193,22 @@ def _set_status(build_id: str, status: str, error: str | None = None, completed:
 def upload_validation(ctx: BuildContext) -> None:
     src = config.project_dir(ctx.project_id) / "source"
     if not src.exists():
-        raise StageError(1, "Project source workspace is missing.")
-    files = [p for p in src.rglob("*") if p.is_file()]
+        raise StageError(1, "Project source workspace is missing. Re-upload the project ZIP.")
+    files = []
+    total = 0
+    for p in src.rglob("*"):
+        try:
+            if p.is_file():
+                files.append(p)
+                total += p.stat().st_size
+        except OSError:
+            continue
     if not files:
+        indexed = db.qvalue("SELECT COUNT(*) FROM project_files WHERE project_id=?", (ctx.project_id,)) or 0
+        if indexed:
+            raise StageError(1, "Source files are not on this server (disk wipe or metadata-only restore). "
+                                 "Re-upload the project ZIP, then rebuild.")
         raise StageError(1, "No files found in the project. Upload a ZIP or folder first.")
-    total = sum(p.stat().st_size for p in files)
     max_bytes = int(db.get_settings().get("max_upload_mb", "200")) * 1024 * 1024
     if total > max_bytes:
         raise StageError(1, f"Project size {total // (1024*1024)} MB exceeds the configured limit.")
@@ -212,16 +231,30 @@ def extraction_check(ctx: BuildContext) -> None:
     src = config.project_dir(ctx.project_id) / "source"
     missing = 0
     mismatch = 0
+    missing_sample = ""
     for r in rows[:20000]:
-        p = src / r["relpath"]
-        if not p.is_file():
+        try:
+            p = src / r["relpath"]
+            if not p.is_file():
+                missing += 1
+                if not missing_sample:
+                    missing_sample = r["relpath"]
+                continue
+            if p.stat().st_size != r["size"]:
+                mismatch += 1
+        except OSError:
             missing += 1
-            continue
-        if p.stat().st_size != r["size"]:
-            mismatch += 1
+            if not missing_sample:
+                missing_sample = r.get("relpath") or ""
     if missing or mismatch:
-        scanner.scan_project(ctx.project_id)  # re-index
-        raise StageError(2, f"Workspace drifted since upload ({missing} missing, {mismatch} size changes). Re-indexed; start the build again.")
+        with contextlib.suppress(Exception):
+            scanner.scan_project(ctx.project_id)  # re-index to what is actually on disk
+        hint = ""
+        if missing:
+            hint = (f" First missing: {missing_sample}."
+                    " If the disk was wiped (Render redeploy), re-upload the project ZIP.")
+        raise StageError(2, f"Workspace drifted since upload ({missing} missing, {mismatch} size changes). "
+                            f"Re-indexed; start the build again.{hint}")
     Stage.message = f"Workspace consistent with {len(rows)} indexed files."
 
 
@@ -315,8 +348,13 @@ def protection(ctx: BuildContext) -> None:
         if rel in prot_set:
             continue  # replaced below
         dest = ctx.package_tree / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(p, dest)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, dest)
+        except FileNotFoundError:
+            raise StageError(5, f"File disappeared during packaging: {rel}. Re-upload and rebuild.")
+        except OSError as e:
+            raise StageError(5, f"Could not copy {rel}: {e}")
         copied += 1
 
     stub_count = 0
@@ -371,7 +409,12 @@ def encryption(ctx: BuildContext) -> None:
     ctx.components_dir.mkdir(parents=True, exist_ok=True)
     n = 0
     for rel in ctx.protected:
-        data = (src / rel).read_bytes()
+        try:
+            data = (src / rel).read_bytes()
+        except FileNotFoundError:
+            raise StageError(6, f"Protected file missing from workspace: {rel}. Re-upload the project ZIP.")
+        except OSError as e:
+            raise StageError(6, f"Could not read {rel}: {e}")
         _seal_component(ctx, rel, data, obfuscated=False)
         n += 1
     if n == 0:
@@ -391,7 +434,10 @@ def obfuscation(ctx: BuildContext) -> None:
     for rel in ctx.protected:
         if Path(rel).suffix.lower() not in scanner.KIND_EXTENSIONS["php"]:
             continue
-        plain = (src / rel).read_bytes()
+        try:
+            plain = (src / rel).read_bytes()
+        except OSError:
+            continue
         try:
             text = plain.decode("utf-8")
         except UnicodeDecodeError:
@@ -663,11 +709,15 @@ def validation(ctx: BuildContext) -> None:
             ok = False
             detail = f"protected php not stubbed: {rel}"
             break
-        if original.is_file() and len(original.read_bytes()) > 0 and \
-                original.read_text() == stub.read_text():
-            ok = False
-            detail = f"plaintext not replaced: {rel}"
-            break
+        if original.is_file():
+            try:
+                orig_bytes = original.read_bytes()
+            except OSError:
+                orig_bytes = b""
+            if len(orig_bytes) > 0 and orig_bytes == stub.read_bytes():
+                ok = False
+                detail = f"plaintext not replaced: {rel}"
+                break
     add("no_protected_plaintext", ok, detail or "all protected PHP replaced by gateway stubs")
 
     passed = all(c["ok"] for c in checks)

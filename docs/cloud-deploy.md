@@ -151,6 +151,7 @@ git push -u origin main
 | `ADDRESS already in use` / boot timeout | Start command must use `$PORT`, not hard-coded `8000` |
 | UI shows “Page not found” on many menus | Hard-refresh with Ctrl+Shift+R (cache). If it persists, open browser Console → look for `SFG page modules failed to load` and paste that line |
 | Login fails after redeploy (Render free) | Ephemeral disk wiped DB → env password re-seeds empty DB on next boot; log in again with same env credentials; restore backup.json for projects/licenses |
+| Build fails: `FileNotFoundError` / `unexpected: … No such file` | Source ZIP wiped with the disk — metadata backup has no file contents. Open the project → **re-upload ZIP** → rebuild. Restore now also skips index rows whose files are absent on disk |
 | Upload fails (413 / timeout) | Lower ZIP size; set `SFG_MAX_UPLOAD_MB=50`; zip only source files |
 | Scan failed after upload | Project → Scan → Rescan; check Logs for the exception |
 | 500 on upload | Free plans often cap body size; raise plan or lower `SFG_MAX_UPLOAD_MB` |

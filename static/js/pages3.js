@@ -17,10 +17,11 @@ SFG.pages["/builds/:id"] = async (r) => {
     stageStates[ev.stage] = st;
     renderStages();
   };
+  const stageList = asList(b, "stages");
   const renderStages = () => {
     const el = qs("#stages");
     if (!el) return;
-    el.innerHTML = b.stages.map((s) => {
+    el.innerHTML = stageList.map((s) => {
       const st = stageStates[s.index];
       let cls = "", mark = s.index;
       if (st) { cls = st.status; mark = st.status === "done" ? "✓" : st.status === "failed" ? "✕" : s.index; }
@@ -48,7 +49,7 @@ SFG.pages["/builds/:id"] = async (r) => {
     if (!el) return;
     el.innerHTML = `
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        ${badge({ completed: "ok", running: "warn", queued: "warn", failed: "danger", disabled: "muted" }[b.status], b.status)}
+        ${badge({ completed: "ok", running: "warn", queued: "warn", failed: "danger", disabled: "muted" }[b.status] || "muted", b.status)}
         <span class="muted small">build ${esc(b.id)} · project <a href="#/projects/${esc(b.project_id)}" class="mono">${esc(b.project_id)}</a> · version ${esc(b.version)}</span>
         <div style="flex:1"></div>
         ${b.status === "completed" ? `<a class="btn primary" href="/api/v1/builds/${esc(b.id)}/download">${I.download} Download protected ZIP</a>` : ""}
@@ -125,7 +126,7 @@ SFG.pages["/builds"] = async () => {
     <td><a class="mono" href="#/builds/${esc(b.id)}" style="color:var(--accent)">${esc(b.id)}</a>
       <div class="faint small">${esc(b.project_id)} · ${esc(b.project_name || "")}</div></td>
     <td class="mono">${esc(b.version)}</td>
-    <td>${badge({ completed: "ok", running: "warn", queued: "warn", failed: "danger", disabled: "muted" }[b.status], b.status)}</td>
+    <td>${badge({ completed: "ok", running: "warn", queued: "warn", failed: "danger", disabled: "muted" }[b.status] || "muted", b.status)}</td>
     <td class="muted small">${esc(b.stage || "—")}</td>
     <td>${b.validation_passed == null ? "" : badge(b.validation_passed ? "ok" : "danger", b.validation_passed ? "passed" : "failed")}</td>
     <td class="muted small">${fmtDate(b.completed_at || b.created_at)}</td>
@@ -146,12 +147,13 @@ SFG.pages["/licenses"] = async (r) => {
   const status = r.params.get("status") || "";
   const q = r.params.get("q") || "";
   const d = await api("GET", `/api/v1/licenses?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`);
+  const licenseRows = asList(d, "licenses");
   const row = (l) => `<tr>
     <td><span class="mono small">${esc(l.id)}</span>
       <div class="faint small">${esc(l.customer_name || l.customer_email || "—")}</div></td>
     <td class="mono small">${esc(l.project_id)}<div class="faint">${esc(l.project_name || "")}</div></td>
     <td class="mono small">${(l.domains || []).map(esc).join(", ") || "—"}</td>
-    <td>${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status], l.status)}</td>
+    <td>${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status] || "muted", l.status)}</td>
     <td class="muted small">${l.activated ? fmtDate(l.activated_at) : "—"}</td>
     <td class="mono small">${esc(l.expires_at)}</td>
     <td class="muted small">${l.last_verified_at ? fmtAgo(l.last_verified_at) : "never"}</td>
@@ -167,18 +169,21 @@ SFG.pages["/licenses"] = async (r) => {
             `<option value="${s}" ${status === s ? "selected" : ""}>${s || "All statuses"}</option>`).join("")}
         </select>
         <div class="spacer"></div>
-        <span class="faint small">${d.licenses.length} shown</span>
+        <span class="faint small">${licenseRows.length} shown</span>
       </div>
-      ${d.licenses.length ? `<div class="tbl-wrap"><table class="tbl">
+      ${licenseRows.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>License / customer</th><th>Project</th><th>Domains</th><th>Status</th><th>Activated</th><th>Expiry</th><th>Last verified</th><th></th></tr></thead>
-        <tbody>${d.licenses.map(row).join("")}</tbody></table></div>`
+        <tbody>${licenseRows.map(row).join("")}</tbody></table></div>`
         : emptyState("key", "No licenses", "Licenses are created per project with one or more authorized domains.",
           `<a class="btn primary" href="#/projects">Go to projects</a>`)}
       <div id="licModalMount"></div>`,
     onReady: () => {
       let t;
-      qs("#lq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => nav("/licenses?q=" + encodeURIComponent(e.target.value) + (status ? "&status=" + status : "")), 350); };
-      qs("#lstatus").onchange = (e) => nav("/licenses" + (e.target.value ? "?status=" + e.target.value : ""));
+      bind("#lq", "oninput", (e) => {
+        clearTimeout(t);
+        t = setTimeout(() => nav("/licenses?q=" + encodeURIComponent(e.target.value) + (status ? "&status=" + status : "")), 350);
+      });
+      bind("#lstatus", "onchange", (e) => nav("/licenses" + (e.target.value ? "?status=" + e.target.value : "")));
       qsa("[data-lv]").forEach((b) => (b.onclick = () => licenseModal(b.dataset.lv)));
     },
   };
@@ -189,12 +194,13 @@ async function licenseModal(lid) {
   const l = d.license;
   const isAdmin = ["super_admin", "admin"].includes(SFG.user.role);
   const act = (label, path, opts = {}) => `<button class="btn sm ${opts.kind || ""}" data-la="${path}">${label}</button>`;
+  const domRows = asList(l, "domains");
   const body = `
     <div class="kv">
       <div class="k">License ID</div><div class="v mono">${esc(l.id)}</div>
       <div class="k">Project</div><div class="v mono">${esc(l.project_id)}</div>
       <div class="k">Customer</div><div class="v">${esc(l.customer_name || "—")} ${l.customer_email ? `<span class="faint">${esc(l.customer_email)}</span>` : ""}</div>
-      <div class="k">Status</div><div class="v">${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status], l.status)}</div>
+      <div class="k">Status</div><div class="v">${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status] || "muted", l.status)}</div>
       <div class="k">Activated</div><div class="v">${l.activated ? fmtDate(l.activated_at) : "not yet"}</div>
       <div class="k">Created</div><div class="v">${fmtDate(l.created_at)}</div>
       <div class="k">Expires</div><div class="v mono">${esc(l.expires_at)}</div>
@@ -204,9 +210,9 @@ async function licenseModal(lid) {
     <h3 style="margin-top:18px">Authorized domains</h3>
     <div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
       <thead><tr><th>Domain</th><th>Status</th><th>Subdomains</th><th>Verified</th><th></th></tr></thead>
-      <tbody>${l.domains.map((dm) => `<tr>
+      <tbody>${domRows.map((dm) => `<tr>
         <td class="mono small">${esc(dm.domain)}</td>
-        <td>${badge({ active: "ok", verified: "ok", pending: "warn", blocked: "danger" }[dm.status], dm.status)}</td>
+        <td>${badge({ active: "ok", verified: "ok", pending: "warn", blocked: "danger" }[dm.status] || "muted", dm.status)}</td>
         <td class="small">${dm.allow_subdomains ? "yes" : "no"}</td>
         <td class="muted small">${dm.verified_at ? fmtDate(dm.verified_at) : "—"}</td>
         <td><div class="row-actions">
@@ -219,11 +225,11 @@ async function licenseModal(lid) {
       <input class="input mono" id="newDom" placeholder="new-domain.com" style="max-width:200px">
       <button class="btn sm" id="addDom">${I.plus} Add domain</button>
     </div>
-    ${l.activations?.length ? `
+    ${asList(l, "activations").length ? `
     <h3 style="margin-top:20px">Recent activations</h3>
     <div class="tbl-wrap" style="border:0;max-height:180px;overflow:auto"><table class="tbl" style="min-width:0">
       <thead><tr><th>Domain</th><th>Result</th><th>Code</th><th>When</th></tr></thead>
-      <tbody>${l.activations.slice(0, 10).map((a) => `<tr>
+      <tbody>${asList(l, "activations").slice(0, 10).map((a) => `<tr>
         <td class="mono small">${esc(a.domain || "—")}</td>
         <td>${a.success ? badge("ok", "success") : badge("danger", "failed")}</td>
         <td class="mono faint small">${esc(a.error_code || "—")}</td>
@@ -257,7 +263,7 @@ async function licenseModal(lid) {
       domunblock: [`/api/v1/licenses/${lid}/domains/DOMAIN/block`, ""],
       domremove: [`/api/v1/licenses/${lid}/domains/DOMAIN/delete`, ""],
     };
-    const dom = (dataEl) => { const tr = dataEl.closest("tr"); return qs(".mono", tr).textContent; };
+    const dom = (dataEl) => { const tr = dataEl && dataEl.closest ? dataEl.closest("tr") : null; return tr ? qs(".mono", tr)?.textContent || "" : ""; };
     let target = action;
     if (target.startsWith("dom")) {
       const el = bd.querySelector(`[data-la="${target}"]`);
@@ -318,7 +324,7 @@ async function licenseModal(lid) {
                 <div class="callout">${esc(r.note || "")}</div>`,
               actions: [{ label: "Done", kind: "primary", onClick: () => { closeModals(); router(); } }],
             });
-            qs("#copyKey2").onclick = async () => { try { await navigator.clipboard.writeText(r.key); toast("Copied", "ok"); } catch (e) { } };
+            qs("#copyKey2") && (qs("#copyKey2").onclick = async () => { try { await navigator.clipboard.writeText(r.key); toast("Copied", "ok"); } catch (e) { } });
           } catch (e) { toast(e.message, "err"); }
         },
       });
@@ -332,8 +338,8 @@ async function licenseModal(lid) {
   };
   bd.querySelectorAll("[data-la]").forEach((b) => (b.onclick = () => doAction(b.dataset.la)));
   const addDom = qs("#addDom", bd);
-  addDom.onclick = async () => {
-    const v = qs("#newDom", bd).value.trim();
+  if (addDom) addDom.onclick = async () => {
+    const v = qs("#newDom", bd)?.value?.trim();
     if (!v) return;
     try {
       const r = await api("POST", `/api/v1/licenses/${lid}/domains`, { domain: v });
@@ -352,11 +358,12 @@ async function licenseModal(lid) {
 SFG.pages["/domains"] = async (r) => {
   const q = r.params.get("q") || "";
   const d = await api("GET", `/api/v1/domains?q=${encodeURIComponent(q)}`);
+  const domainRows = asList(d, "domains");
   const row = (x) => `<tr>
     <td class="mono small">${esc(x.domain)}</td>
     <td class="mono small">${esc(x.project_id)}<div class="faint">${esc(x.project_name || "")}</div></td>
     <td class="mono small">${esc(x.license_id)}</td>
-    <td>${badge({ active: "ok", verified: "ok", pending: "warn", blocked: "danger" }[x.status], x.status)}</td>
+    <td>${badge({ active: "ok", verified: "ok", pending: "warn", blocked: "danger" }[x.status] || "muted", x.status)}</td>
     <td class="muted small">${fmtDate(x.added_at)}</td>
     <td class="muted small">${x.verified_at ? fmtDate(x.verified_at) : "—"}</td>
     <td><div class="row-actions">
@@ -370,17 +377,20 @@ SFG.pages["/domains"] = async (r) => {
     html: `
       <div class="filterbar">
         <input class="input" id="dq" placeholder="Search domains or projects…" value="${esc(q)}">
-        <div class="spacer"></div><span class="faint small">${d.domains.length} domains</span>
+        <div class="spacer"></div><span class="faint small">${domainRows.length} domains</span>
       </div>
-      ${d.domains.length ? `<div class="tbl-wrap"><table class="tbl">
+      ${domainRows.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Domain</th><th>Project</th><th>License</th><th>Status</th><th>Added</th><th>Last verified</th><th></th></tr></thead>
-        <tbody>${d.domains.map(row).join("")}</tbody></table></div>`
+        <tbody>${domainRows.map(row).join("")}</tbody></table></div>`
         : emptyState("globe", "No domains", "Domains are added when licenses are created.",
           `<a class="btn primary" href="#/licenses">Go to licenses</a>`)}
       <div class="faint small" style="margin-top:10px">Verification uses a real DNS TXT lookup (<span class="mono">_sfg-verify.&lt;domain&gt;</span>) with manual approval as fallback. Blocked domains fail all verifications immediately.</div>`,
     onReady: () => {
       let t;
-      qs("#dq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => nav("/domains?q=" + encodeURIComponent(e.target.value)), 350); };
+      bind("#dq", "oninput", (e) => {
+        clearTimeout(t);
+        t = setTimeout(() => nav("/domains?q=" + encodeURIComponent(e.target.value)), 350);
+      });
       qsa("[data-dv]").forEach((b) => (b.onclick = async () => {
         const [lid, dom] = b.dataset.dv.split("|");
         try {
@@ -410,11 +420,12 @@ SFG.pages["/domains"] = async (r) => {
 /* ================= USERS ================= */
 SFG.pages["/users"] = async () => {
   const d = await api("GET", "/api/v1/users");
+  const userRows = asList(d, "users");
   const row = (u) => `<tr>
     <td class="mono small">${esc(u.email)}</td>
-    <td>${esc(u.name)}</td>
-    <td>${badge(u.role === "super_admin" ? "danger" : u.role === "admin" ? "warn" : "info", u.role.replace("_", " "))}</td>
-    <td class="num">${u.project_count}</td>
+    <td>${esc(u.name || "")}</td>
+    <td>${badge(u.role === "super_admin" ? "danger" : u.role === "admin" ? "warn" : "info", String(u.role || "user").replace("_", " "))}</td>
+    <td class="num">${u.project_count ?? 0}</td>
     <td>${u.disabled ? badge("muted", "disabled") : badge("ok", "enabled")}</td>
     <td class="muted small">${u.last_login_at ? fmtAgo(u.last_login_at) : "never"}</td>
     <td><div class="row-actions">
@@ -440,12 +451,12 @@ SFG.pages["/users"] = async () => {
       </div>
       <div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Projects</th><th>Status</th><th>Last login</th><th></th></tr></thead>
-        <tbody>${d.users.map(row).join("")}</tbody></table></div>`,
+        <tbody>${userRows.map(row).join("")}</tbody></table></div>`,
     onReady: () => {
-      qs("#uCreate").onclick = async () => {
+      bind("#uCreate", "onclick", async () => {
         try {
           const r = await api("POST", "/api/v1/users", {
-            email: qs("#uEmail").value.trim(), name: qs("#uName").value.trim(), role: qs("#uRole").value,
+            email: qs("#uEmail")?.value?.trim() || "", name: qs("#uName")?.value?.trim() || "", role: qs("#uRole")?.value || "user",
           });
           modal({
             title: "User created",
@@ -468,7 +479,7 @@ SFG.pages["/users"] = async () => {
             {
               label: "Save", kind: "primary",
               onClick: async () => {
-                try { await api("PATCH", `/api/v1/users/${b.dataset.ur}`, { role: qs("#roleSel").value }); toast("Role updated", "ok"); closeModals(); router(); }
+                try { await api("PATCH", `/api/v1/users/${b.dataset.ur}`, { role: qs("#roleSel")?.value || "user" }); toast("Role updated", "ok"); closeModals(); router(); }
                 catch (e) { toast(e.message, "err"); }
               },
             },
@@ -516,7 +527,7 @@ SFG.pages["/ai"] = async () => {
     <div class="card">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <a class="mono" href="#/projects/${esc(x.project.id)}?tab=ai" style="color:var(--accent)">${esc(x.project.id)}</a>
-        ${badge(x.latest.engine === "llm" ? "info" : "muted", x.latest.engine)}
+        ${badge(x.latest.engine === "llm" ? "info" : "muted", x.latest.engine || "builtin")}
         <span class="faint small">${esc(x.latest.model || "")} · ${fmtAgo(x.latest.generated_at)}</span>
         <div style="flex:1"></div>
         ${badge("warn", x.latest.recommendation?.protection_level || "standard")}
@@ -567,8 +578,10 @@ SFG.pages["/ai"] = async () => {
 SFG.pages["/events"] = async (r) => {
   const [type, severity, project_id, from, to] = ["type", "severity", "project_id", "from", "to"].map((k) => r.params.get(k) || "");
   const d = await api("GET", `/api/v1/events?type=${encodeURIComponent(type)}&severity=${encodeURIComponent(severity)}&project_id=${encodeURIComponent(project_id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const eventRows = asList(d, "events");
+  const typeCounts = asList(d, "type_counts");
   const row = (e) => `<tr>
-    <td>${badge({ critical: "danger", warning: "warn", info: "info" }[e.severity], e.severity)}</td>
+    <td>${badge({ critical: "danger", warning: "warn", info: "info" }[e.severity] || "muted", e.severity)}</td>
     <td class="mono small">${esc(e.type)}</td>
     <td class="mono small">${esc(e.project_id || "—")}</td>
     <td class="mono small">${esc(e.license_id || "—")}</td>
@@ -583,7 +596,7 @@ SFG.pages["/events"] = async (r) => {
         <input class="input" id="eq" placeholder="Search type/detail…" value="${esc(r.params.get("q") || "")}">
         <select class="input" id="etype">
           <option value="">All types</option>
-          ${d.type_counts.map((t) => `<option value="${esc(t.type)}" ${type === t.type ? "selected" : ""}>${esc(t.type)} (${t.c})</option>`).join("")}
+          ${typeCounts.map((t) => `<option value="${esc(t.type)}" ${type === t.type ? "selected" : ""}>${esc(t.type)} (${t.c})</option>`).join("")}
         </select>
         <select class="input" id="esev">
           ${["", "info", "warning", "critical"].map((s) => `<option value="${s}" ${severity === s ? "selected" : ""}>${s || "All severities"}</option>`).join("")}
@@ -593,17 +606,25 @@ SFG.pages["/events"] = async (r) => {
         <div class="spacer"></div>
         <a class="btn sm" href="/api/v1/events/export.csv?type=${encodeURIComponent(type)}&severity=${encodeURIComponent(severity)}&project_id=${encodeURIComponent(project_id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}">${I.download} CSV</a>
       </div>
-      ${d.events.length ? `<div class="tbl-wrap"><table class="tbl">
+      ${eventRows.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Severity</th><th>Type</th><th>Project</th><th>License</th><th>Detail</th><th>IP</th><th>When</th></tr></thead>
-        <tbody>${d.events.map(row).join("")}</tbody></table></div>
-        <div class="faint small" style="margin-top:10px">${d.events.length} events (capped at 1000 per page)</div>`
+        <tbody>${eventRows.map(row).join("")}</tbody></table></div>
+        <div class="faint small" style="margin-top:10px">${eventRows.length} events (capped at 1000 per page)</div>`
         : emptyState("shield", "No security events", "Verification failures, unauthorized domains, signature and integrity failures are recorded here.")}
       <div class="faint small" style="margin-top:10px">Credential values are never logged. IPs and masked details only.</div>`,
     onReady: () => {
-      const go = () => nav(`/events?type=${encodeURIComponent(qs("#etype").value)}&severity=${encodeURIComponent(qs("#esev").value)}&project_id=${encodeURIComponent(project_id)}&from=${encodeURIComponent(qs("#efrom").value)}&to=${encodeURIComponent(qs("#eto").value)}&q=${encodeURIComponent(qs("#eq").value)}`);
-      ["#etype", "#esev"].forEach((s) => (qs(s).onchange = go));
-      ["#efrom", "#eto"].forEach((s) => (qs(s).onchange = go));
-      let t; qs("#eq").oninput = () => { clearTimeout(t); t = setTimeout(go, 350); };
+      const go = () => {
+        const et = qs("#etype")?.value || "";
+        const es = qs("#esev")?.value || "";
+        const ef = qs("#efrom")?.value || "";
+        const eo = qs("#eto")?.value || "";
+        const eq = qs("#eq")?.value || "";
+        nav(`/events?type=${encodeURIComponent(et)}&severity=${encodeURIComponent(es)}&project_id=${encodeURIComponent(project_id)}&from=${encodeURIComponent(ef)}&to=${encodeURIComponent(eo)}&q=${encodeURIComponent(eq)}`);
+      };
+      ["#etype", "#esev"].forEach((s) => bind(s, "onchange", go));
+      ["#efrom", "#eto"].forEach((s) => bind(s, "onchange", go));
+      let t;
+      bind("#eq", "oninput", () => { clearTimeout(t); t = setTimeout(go, 350); });
     },
   };
 };
@@ -612,13 +633,14 @@ SFG.pages["/events"] = async (r) => {
 SFG.pages["/verifications"] = async (r) => {
   const [result, error_code, license_id] = [r.params.get("result") || "", r.params.get("error_code") || "", r.params.get("license_id") || ""];
   const d = await api("GET", `/api/v1/verifications?result=${encodeURIComponent(result)}&error_code=${encodeURIComponent(error_code)}&license_id=${encodeURIComponent(license_id)}`);
+  const verifRows = asList(d, "verifications");
   const row = (v) => `<tr>
     <td class="mono small">${esc(v.license_id || "—")}</td>
     <td class="mono small">${esc(v.project_id || "—")}</td>
     <td class="mono small">${esc(v.domain || "—")}</td>
-    <td>${badge(v.result === "ok" ? "ok" : "danger", v.result)}</td>
+    <td>${badge(v.result === "ok" ? "ok" : "danger", v.result || "unknown")}</td>
     <td class="mono small">${esc(v.error_code || "—")}</td>
-    <td class="num small">${v.latency_ms} ms</td>
+    <td class="num small">${v.latency_ms ?? 0} ms</td>
     <td class="mono faint small">${esc(v.ip || "")}</td>
     <td class="muted small">${fmtDate(v.created_at)}</td>
   </tr>`;
@@ -633,15 +655,20 @@ SFG.pages["/verifications"] = async (r) => {
         <div class="spacer"></div>
         <a class="btn sm" href="/api/v1/verifications/export.csv?result=${encodeURIComponent(result)}&license_id=${encodeURIComponent(license_id)}">${I.download} CSV</a>
       </div>
-      ${d.verifications.length ? `<div class="tbl-wrap"><table class="tbl">
+      ${verifRows.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>License</th><th>Project</th><th>Domain</th><th>Result</th><th>Error</th><th>Latency</th><th>IP</th><th>When</th></tr></thead>
-        <tbody>${d.verifications.map(row).join("")}</tbody></table></div>`
+        <tbody>${verifRows.map(row).join("")}</tbody></table></div>`
         : emptyState("list", "No verification activity", "Every /licenses/verify and /activate call is logged here with result, latency and error code.")}
       <div class="faint small" style="margin-top:10px">Retention is configurable in Settings (default 90 days).</div>`,
     onReady: () => {
-      const go = () => nav(`/verifications?result=${encodeURIComponent(qs("#vres").value)}&license_id=${encodeURIComponent(qs("#vlc").value)}`);
-      qs("#vres").onchange = go;
-      let t; qs("#vlc").oninput = () => { clearTimeout(t); t = setTimeout(go, 350); };
+      const go = () => {
+        const res = qs("#vres")?.value || "";
+        const lc = qs("#vlc")?.value || "";
+        nav(`/verifications?result=${encodeURIComponent(res)}&license_id=${encodeURIComponent(lc)}`);
+      };
+      bind("#vres", "onchange", go);
+      let t;
+      bind("#vlc", "oninput", () => { clearTimeout(t); t = setTimeout(go, 350); });
     },
   };
 };
@@ -650,6 +677,7 @@ SFG.pages["/verifications"] = async (r) => {
 SFG.pages["/audit"] = async (r) => {
   const q = r.params.get("q") || "";
   const d = await api("GET", `/api/v1/audit?q=${encodeURIComponent(q)}`);
+  const auditRows = asList(d, "audit");
   const row = (a) => `<tr>
     <td class="mono small">${esc(a.actor_email || "system")}</td>
     <td class="mono small">${esc(a.action)}</td>
@@ -662,13 +690,17 @@ SFG.pages["/audit"] = async (r) => {
     title: "Audit Log",
     html: `
       <div class="filterbar"><input class="input" id="aq" placeholder="Search resource / detail…" value="${esc(q)}"></div>
-      ${d.audit.length ? `<div class="tbl-wrap"><table class="tbl">
+      ${auditRows.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Actor</th><th>Action</th><th>Resource</th><th>Result</th><th>Detail</th><th>When</th></tr></thead>
-        <tbody>${d.audit.map(row).join("")}</tbody></table></div>`
+        <tbody>${auditRows.map(row).join("")}</tbody></table></div>`
         : emptyState("list", "No audit entries", "Administrative actions (logins, builds, license changes, domain changes, settings) are recorded here.")}
       <div class="faint small" style="margin-top:10px">Passwords and private keys are never written to the audit log.</div>`,
     onReady: () => {
-      let t; qs("#aq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => nav("/audit?q=" + encodeURIComponent(e.target.value)), 350); };
+      let t;
+      bind("#aq", "oninput", (e) => {
+        clearTimeout(t);
+        t = setTimeout(() => nav("/audit?q=" + encodeURIComponent(e.target.value)), 350);
+      });
     },
   };
 };
@@ -703,7 +735,7 @@ SFG.pages["/versions"] = async () => {
 /* ================= SETTINGS ================= */
 SFG.pages["/settings"] = async () => {
   const d = await api("GET", "/api/v1/settings");
-  const s = d.settings;
+  const s = d.settings || {};
   const field = (key, label, type = "text", placeholder = "") => `
     <label class="f">${label}</label>
     <input class="input mono" data-set="${key}" type="${type}" value="${esc(s[key] ?? "")}" placeholder="${placeholder}">`;
@@ -758,19 +790,20 @@ SFG.pages["/settings"] = async () => {
         </div>
       </div>`,
     onReady: () => {
-      qs("#saveSettings").onclick = async () => {
+      bind("#saveSettings", "onclick", async () => {
         const body = {};
         qsa("[data-set]").forEach((el) => { body[el.dataset.set] = el.value; });
-        const key = qs("#aiKey").value.trim();
+        const key = qs("#aiKey")?.value?.trim();
         if (key) body.ai_key = key;
         try {
           const r = await api("POST", "/api/v1/settings", body);
-          qs("#saveMsg").textContent = "Saved: " + r.changed.join(", ");
+          const msg = qs("#saveMsg");
+          if (msg) msg.textContent = "Saved: " + (r.changed || []).join(", ");
           toast("Settings saved", "ok");
         } catch (e) { toast(e.message, "err"); }
-      };
+      });
 
-      qs("#dlBackup").onclick = async () => {
+      bind("#dlBackup", "onclick", async () => {
         try {
           const r = await fetch("/api/v1/backup/export", { credentials: "include" });
           if (!r.ok) throw new Error("Backup export failed");
@@ -780,23 +813,25 @@ SFG.pages["/settings"] = async () => {
           a.download = "sfg-backup-" + new Date().toISOString().slice(0, 10) + ".json";
           a.click();
           URL.revokeObjectURL(a.href);
-          qs("#backupMsg").textContent = "Downloaded. Keep this file safe.";
+          const m = qs("#backupMsg");
+          if (m) m.textContent = "Downloaded. Keep this file safe.";
           toast("Backup downloaded", "ok");
         } catch (e) { toast(e.message, "err"); }
-      };
+      });
 
-      qs("#upBackup").onchange = async (e) => {
+      bind("#upBackup", "onchange", async (e) => {
         const f = e.target.files[0];
         if (!f) return;
         try {
           const text = await f.text();
           const bundle = JSON.parse(text);
           const r = await api("POST", "/api/v1/backup/restore", bundle);
-          qs("#backupMsg").textContent = "Restored " + (r.entry_count || 0) + " entries.";
+          const m = qs("#backupMsg");
+          if (m) m.textContent = "Restored " + (r.entry_count || 0) + " entries.";
           toast("Backup restored", "ok");
           router();
         } catch (err) { toast(err.message || "Restore failed", "err"); }
-      };
+      });
     },
   };
 };
@@ -804,10 +839,10 @@ SFG.pages["/settings"] = async () => {
 /* ================= HEALTH ================= */
 SFG.pages["/health"] = async () => {
   const d = await api("GET", "/api/v1/health");
-  const s = d.system;
+  const s = d.system || {};
   const item = (name, st, detail = "") => `
     <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(148,163,184,.07)">
-      ${badge({ ok: "ok", configured: "ok", not_configured: "muted", warning: "warn", error: "danger" }[st.status] || "muted", st.status)}
+      ${badge({ ok: "ok", configured: "ok", not_configured: "muted", warning: "warn", error: "danger" }[st?.status] || "muted", st?.status || "unknown")}
       <div style="flex:1"><div class="small" style="font-weight:600">${name}</div>
       ${detail ? `<div class="faint small">${detail}</div>` : ""}</div>
     </div>`;
@@ -817,21 +852,21 @@ SFG.pages["/health"] = async () => {
       <div class="grid cards-2">
         <div class="card">
           <h3>Services</h3>
-          ${item("Database (SQLite)", s.database, `${s.database.tables} tables · ${s.database.detail}`)}
-          ${item("License API (signature round-trip)", s.license_api, s.license_api.detail)}
-          ${item("Build service", s.build_service, `${s.build_service.active_builds}/${s.build_service.limit} active builds`)}
-          ${item("Storage", s.storage, `${s.storage.free_mb} MB free · ${s.storage.projects_count} project workspaces · ${s.storage.projects_used_mb} MB`)}
-          ${item("AI service", s.ai_service, s.ai_service.note)}
+          ${item("Database (SQLite)", s.database?.status || "not_configured", `${s.database?.tables ?? 0} tables · ${s.database?.detail || ""}`)}
+          ${item("License API (signature round-trip)", s.license_api?.status || "not_configured", s.license_api?.detail || "")}
+          ${item("Build service", s.build_service?.status || "not_configured", `${s.build_service?.active_builds ?? 0}/${s.build_service?.limit ?? 0} active builds`)}
+          ${item("Storage", s.storage?.status || "not_configured", `${s.storage?.free_mb ?? 0} MB free · ${s.storage?.projects_count ?? 0} project workspaces · ${s.storage?.projects_used_mb ?? 0} MB`)}
+          ${item("AI service", s.ai_service?.status || "not_configured", s.ai_service?.note || "")}
         </div>
         <div class="card">
           <h3>Key material & recent problems</h3>
           <div class="detail-grid" style="margin-top:6px">
-            <div class="item"><div class="k">System</div><div class="v">${esc(s.name)} v${esc(s.version)}</div></div>
+            <div class="item"><div class="k">System</div><div class="v">${esc(s.name || "Secure File Guard")} v${esc(s.version || "")}</div></div>
             <div class="item"><div class="k">Signing key age</div><div class="v">${s.signing_key_age_days != null ? s.signing_key_age_days + " days" : "—"}</div></div>
-            <div class="item"><div class="k">Failed verifications (24h)</div><div class="v" style="color:${s.failed_verifications_24h ? "var(--danger)" : "inherit"}">${s.failed_verifications_24h}</div></div>
+            <div class="item"><div class="k">Failed verifications (24h)</div><div class="v" style="color:${s.failed_verifications_24h ? "var(--danger)" : "inherit"}">${s.failed_verifications_24h ?? 0}</div></div>
           </div>
           <h3 style="margin-top:18px">Recent critical event types (24h)</h3>
-          ${s.recent_critical_events.length ? s.recent_critical_events.map((e) =>
+          ${asList(s, "recent_critical_events").length ? asList(s, "recent_critical_events").map((e) =>
             `<div class="small" style="display:flex;justify-content:space-between;padding:5px 0">
               <span class="mono">${esc(e.type)}</span><span class="muted">${e.c}</span></div>`).join("")
             : `<div class="muted small">None.</div>`}
@@ -844,6 +879,7 @@ SFG.pages["/health"] = async () => {
 /* ================= BACKUPS ================= */
 SFG.pages["/backups"] = async () => {
   const d = await api("GET", "/api/v1/backup");
+  const backupRows = asList(d, "backups");
   return {
     title: "Backups",
     html: `
@@ -868,32 +904,34 @@ SFG.pages["/backups"] = async () => {
       </div>
       <div class="card" style="margin-top:16px">
         <h3>Backup history</h3>
-        ${d.backups.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
+        ${backupRows.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
           <thead><tr><th>Kind</th><th>Entries</th><th>SHA-256</th><th>When</th></tr></thead>
-          <tbody>${d.backups.map((b) => `<tr>
-            <td>${esc(b.kind)}</td><td class="num">${b.entry_count}</td>
-            <td class="mono small">${esc(b.sha256.slice(0, 20))}…</td>
+          <tbody>${backupRows.map((b) => `<tr>
+            <td>${esc(b.kind)}</td><td class="num">${b.entry_count ?? 0}</td>
+            <td class="mono small">${esc(String(b.sha256 || "").slice(0, 20))}…</td>
             <td class="muted small">${fmtDate(b.created_at)}</td></tr>`).join("")}</tbody></table></div>`
           : `<div class="muted small">No restores performed yet.</div>`}
       </div>`,
     onReady: () => {
       const dz = qs("#restoreDz"), inp = qs("#restoreInput");
-      dz.onclick = () => inp.click();
-      inp.onchange = async () => {
-        const f = inp.files[0];
-        if (!f) return;
-        const msg = qs("#restoreMsg");
-        msg.innerHTML = `<div class="loading-row"><span class="spinner"></span>Verifying signature…</div>`;
-        try {
-          const bundle = JSON.parse(await f.text());
-          const r = await api("POST", "/api/v1/backup/restore", bundle);
-          msg.innerHTML = `<div class="callout" style="border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.07);color:#6ee7b7">
-            Restored ${r.entry_count} entries: ${esc(Object.entries(r.restored).map(([k, v]) => `${k}: ${v}`).join(", "))}</div>`;
-          toast("Restore complete", "ok");
-        } catch (e) {
-          msg.innerHTML = errBox(e);
-        }
-      };
+      if (dz && inp) {
+        dz.onclick = () => inp.click();
+        inp.onchange = async () => {
+          const f = inp.files[0];
+          if (!f) return;
+          const msg = qs("#restoreMsg");
+          if (msg) msg.innerHTML = `<div class="loading-row"><span class="spinner"></span>Verifying signature…</div>`;
+          try {
+            const bundle = JSON.parse(await f.text());
+            const r = await api("POST", "/api/v1/backup/restore", bundle);
+            if (msg) msg.innerHTML = `<div class="callout" style="border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.07);color:#6ee7b7">
+              Restored ${r.entry_count} entries: ${esc(Object.entries(r.restored || {}).map(([k, v]) => `${k}: ${v}`).join(", "))}</div>`;
+            toast("Restore complete", "ok");
+          } catch (e) {
+            if (msg) msg.innerHTML = errBox(e);
+          }
+        };
+      }
     },
   };
 };

@@ -36,7 +36,7 @@ SFG.pages["/projects/:id"] = async (r) => {
         <a class="btn sm ghost" href="#/projects">← Projects</a>
         <span class="mono" style="color:var(--accent)">${esc(p.id)}</span>
         ${badge(p.status === "active" ? "ok" : "muted", p.status)}
-        ${badge("muted", p.protection_level + " protection")}
+        ${badge("muted", (p.protection_level || "basic") + " protection")}
         <span class="faint small">owner: ${esc(p.owner_email || "—")} · created ${fmtDate(p.created_at)}</span>
         <div style="flex:1"></div>
         ${isAdmin ? `<button class="btn sm" id="archBtn">${p.status === "archived" ? "Restore" : "Archive"}</button>` : ""}
@@ -75,17 +75,18 @@ SFG.pages["/projects/:id"] = async (r) => {
 /* ---------------- tab bodies (return HTML strings) ---------------- */
 
 function tabOverview(p, isAdmin) {
+  const licenseCount = asList(p, "licenses").length;
   return `
     <div class="grid cards-2">
       <div class="card">
         <h3>Project details</h3>
         <div class="detail-grid">
           <div class="item"><div class="k">Project ID</div><div class="v mono">${esc(p.id)}</div></div>
-          <div class="item"><div class="k">Name</div><div class="v">${esc(p.name)}</div></div>
+            <div class="item"><div class="k">Name</div><div class="v">${esc(p.name || "")}</div></div>
           <div class="item"><div class="k">Owner</div><div class="v">${esc(p.owner_email || "—")}</div></div>
-          <div class="item"><div class="k">Files</div><div class="v">${p.file_count}</div></div>
-          <div class="item"><div class="k">Total size</div><div class="v">${fmtBytes(p.total_size)}</div></div>
-          <div class="item"><div class="k">Protection level</div><div class="v">${esc(p.protection_level)}</div></div>
+            <div class="item"><div class="k">Files</div><div class="v">${p.file_count ?? 0}</div></div>
+            <div class="item"><div class="k">Total size</div><div class="v">${fmtBytes(p.total_size)}</div></div>
+            <div class="item"><div class="k">Protection level</div><div class="v">${esc(p.protection_level || "basic")}</div></div>
           <div class="item"><div class="k">Created</div><div class="v">${fmtDate(p.created_at)}</div></div>
           <div class="item"><div class="k">Updated</div><div class="v">${fmtDate(p.updated_at)}</div></div>
         </div>
@@ -98,13 +99,13 @@ function tabOverview(p, isAdmin) {
         </form>` : ""}
       </div>
       <div class="card">
-        <h3>Licenses (${p.licenses.length})</h3>
-        ${p.licenses.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
+        <h3>Licenses (${licenseCount})</h3>
+        ${licenseCount ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
           <thead><tr><th>License</th><th>Status</th><th>Expiry</th></tr></thead>
-          <tbody>${p.licenses.map((l) => `<tr>
+          <tbody>${asList(p, "licenses").map((l) => `<tr>
             <td><span class="mono small">${esc(l.id)}</span>
               <div class="faint small">${esc(l.customer_name || l.customer_email || "")}</div></td>
-            <td>${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status], l.status)}</td>
+            <td>${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status] || "muted", l.status)}</td>
             <td class="mono small">${esc(l.expires_at)}</td></tr>`).join("")}</tbody></table></div>`
           : emptyState("key", "No licenses", "Create a license bound to an authorized domain, then build the protected package.",
             `<a class="btn" href="#/projects/${esc(p.id)}?tab=licenses">Create license</a>`)}
@@ -209,7 +210,7 @@ async function bindOverview(p, isAdmin) {
     e.preventDefault();
     try {
       await api("PATCH", `/api/v1/projects/${p.id}`, {
-        name: qs("#mName").value, protection_level: qs("#mLevel").value,
+        name: qs("#mName")?.value || p.name, protection_level: qs("#mLevel")?.value || p.protection_level,
       });
       toast("Project updated", "ok"); router();
     } catch (err) { toast(err.message, "err"); }
@@ -221,14 +222,16 @@ async function bindScan(p) {
   if (!wrap) return;
   try {
     const d = await api("GET", `/api/v1/projects/${p.id}/scan`);
-    const s = d.scan;
-    const kindCards = Object.entries(s.by_kind).map(([k, v]) =>
+    const s = d.scan || {};
+    const kindCards = Object.entries(s.by_kind || {}).map(([k, v]) =>
       `<div class="item"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`).join("");
+    const sensFiles = asList(s, "sensitive_files");
+    const sensFindings = asList(s, "secret_findings");
     wrap.innerHTML = `
       <div class="card" style="margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <h3 style="margin:0">Scan report</h3>
-          <span class="muted small">scanned ${fmtDate(s.scanned_at)} · ${s.file_count} files · ${fmtBytes(s.total_size)}</span>
+          <span class="muted small">scanned ${fmtDate(s.scanned_at)} · ${s.file_count ?? 0} files · ${fmtBytes(s.total_size)}</span>
           <div style="flex:1"></div>
           <button class="btn sm" id="rescan">${I.refresh} Rescan</button>
         </div>
@@ -240,18 +243,18 @@ async function bindScan(p) {
       </div>
       <div class="grid cards-2">
         <div class="card"><h3>Potential sensitive files</h3>
-          ${s.sensitive_files.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
+          ${sensFiles.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
             <thead><tr><th>File</th><th>Why</th><th>Secrets</th></tr></thead>
-            <tbody>${s.sensitive_files.map((f) => `<tr>
+            <tbody>${sensFiles.map((f) => `<tr>
               <td class="mono small">${esc(f.file)}</td>
               <td class="muted small">${esc((f.reasons || []).join(", ") || "—")}</td>
               <td class="num">${f.secret_count || 0}</td></tr>`).join("")}</tbody></table></div>`
             : emptyState("check", "No sensitive files detected", "")}
         </div>
         <div class="card"><h3>Credential-looking values (masked)</h3>
-          ${s.secret_findings.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
+          ${sensFindings.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl" style="min-width:0">
             <thead><tr><th>File:line</th><th>Type</th><th>Masked value</th></tr></thead>
-            <tbody>${s.secret_findings.slice(0, 100).map((f) => `<tr>
+            <tbody>${sensFindings.slice(0, 100).map((f) => `<tr>
               <td class="mono small">${esc(f.file)}:${f.line}</td>
               <td><span class="sev-${esc(f.severity)}">${esc(f.type)}</span></td>
               <td class="mono small">${esc(f.masked)}</td></tr>`).join("")}</tbody></table></div>`
@@ -259,7 +262,7 @@ async function bindScan(p) {
         </div>
       </div>`;
     const rs = qs("#rescan", wrap);
-    rs.onclick = async () => {
+    if (rs) rs.onclick = async () => {
       rs.disabled = true;
       try { await api("GET", `/api/v1/projects/${p.id}/scan?rescan=true`); toast("Rescanned", "ok"); router(); }
       catch (e) { toast(e.message, "err"); rs.disabled = false; }
@@ -287,7 +290,7 @@ async function bindAI(p) {
         <div class="card" style="margin-bottom:16px">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <h3 style="margin:0">AI analysis</h3>
-            ${badge(a.engine === "llm" ? "info" : "muted", a.engine + " engine")}
+            ${badge(a.engine === "llm" ? "info" : "muted", (a.engine || "builtin") + " engine")}
             <span class="muted small">${esc(a.model || "")} · ${fmtDate(a.generated_at)}</span>
             <div style="flex:1"></div>
             <button class="btn sm" id="aiRun">${I.refresh} Re-run (builtin)</button>
@@ -380,10 +383,10 @@ async function bindProtection(p) {
         </div>
       </div>`;
     const start = qs("#startBuild", body);
-    start.onclick = async () => {
-      const ver = qs("#newVer", body).value.trim() || qs("#verSel", body).value;
-      const inc = qs("#incList", body).value.split("\n").map((s) => s.trim()).filter(Boolean);
-      const exc = qs("#excList", body).value.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (start) start.onclick = async () => {
+      const ver = (qs("#newVer", body)?.value?.trim()) || qs("#verSel", body)?.value || "1.0";
+      const inc = (qs("#incList", body)?.value || "").split("\n").map((s) => s.trim()).filter(Boolean);
+      const exc = (qs("#excList", body)?.value || "").split("\n").map((s) => s.trim()).filter(Boolean);
       const msg = qs("#buildStartMsg", body);
       start.disabled = true;
       try {
@@ -393,12 +396,13 @@ async function bindProtection(p) {
             await api("POST", `/api/v1/projects/${p.id}/versions`, { version: ver, note: "created at build time" });
           } catch (e) { if (e.code !== "DUPLICATE") throw e; }
         }
-        const d2 = await api("POST", `/api/v1/projects/${p.id}/builds`, { version: ver, include: inc, exclude: exc, obfuscate: qs("#obfChk", body).checked });
-        msg.innerHTML = `<span class="badge ok">Build ${esc(d2.build_id)} started</span>`;
+        const obf = qs("#obfChk", body);
+        const d2 = await api("POST", `/api/v1/projects/${p.id}/builds`, { version: ver, include: inc, exclude: exc, obfuscate: !!(obf && obf.checked) });
+        if (msg) msg.innerHTML = `<span class="badge ok">Build ${esc(d2.build_id)} started</span>`;
         toast("Build started", "ok");
         setTimeout(() => nav(`/builds/${d2.build_id}`), 500);
       } catch (e) {
-        msg.innerHTML = errBox(e);
+        if (msg) msg.innerHTML = errBox(e);
         start.disabled = false;
       }
     };
@@ -408,10 +412,10 @@ async function bindProtection(p) {
 function bindVersions(p) {
   const create = qs("#vCreate");
   if (create) create.onclick = async () => {
-    const version = qs("#vVer").value.trim();
+    const version = qs("#vVer")?.value?.trim() || "";
     if (!/^\d+\.\d+(\.\d+)?$/.test(version)) return toast("Version must look like 1.0 or 1.0.1", "warn");
     try {
-      await api("POST", `/api/v1/projects/${p.id}/versions`, { version, note: qs("#vNote").value.trim() });
+      await api("POST", `/api/v1/projects/${p.id}/versions`, { version, note: qs("#vNote")?.value?.trim() || "" });
       toast("Version created", "ok"); router();
     } catch (e) { toast(e.message, "err"); }
   };
@@ -436,7 +440,8 @@ async function bindBuilds(p, isAdmin) {
   if (!wrap) return;
   try {
     const d = await api("GET", `/api/v1/projects/${p.id}/builds`);
-    if (!d.builds.length) {
+    const buildRows = asList(d, "builds");
+    if (!buildRows.length) {
       wrap.innerHTML = emptyState("box", "No builds yet", "Configure protection and start the first protected build.",
         `<a class="btn primary" href="#/projects/${esc(p.id)}?tab=protection">Configure protection</a>`);
       return;
@@ -455,7 +460,7 @@ async function bindBuilds(p, isAdmin) {
       </div></td></tr>`;
     wrap.innerHTML = `<div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Build</th><th>Version</th><th>Status</th><th>Stage</th><th>Validation</th><th>Time</th><th></th></tr></thead>
-      <tbody>${d.builds.map(row).join("")}</tbody></table></div>`;
+      <tbody>${buildRows.map(row).join("")}</tbody></table></div>`;
     qsa("[data-bdis]", wrap).forEach((b) => (b.onclick = () => confirmModal({
       title: "Disable build", danger: true, confirmLabel: "Disable",
       message: "Disabled builds immediately fail license verification for all deployments using them.",
@@ -473,9 +478,11 @@ async function bindBuilds(p, isAdmin) {
 
 async function bindLicenses(p, isAdmin) {
   const wrap = qs("#licWrap");
+  if (!wrap) return;
   const load = async () => {
     const d = await api("GET", `/api/v1/licenses?project_id=${p.id}`);
-    if (!d.licenses.length) {
+    const rows = asList(d, "licenses");
+    if (!rows.length) {
       wrap.innerHTML = `<div class="tbl-wrap"><div style="padding:20px">${emptyState("key", "No licenses for this project", "")}</div></div>`;
       return;
     }
@@ -483,28 +490,29 @@ async function bindLicenses(p, isAdmin) {
       <td><span class="mono small">${esc(l.id)}</span>
         <div class="faint small">${esc(l.customer_name || l.customer_email || "—")}</div></td>
       <td>${(l.domains || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</td>
-      <td>${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status], l.status)}</td>
+      <td>${badge({ active: "ok", pending: "warn", suspended: "info", expired: "warn", revoked: "danger" }[l.status] || "muted", l.status)}</td>
       <td class="mono small">${esc(l.expires_at)}</td>
       <td class="muted small">${l.last_verified_at ? fmtAgo(l.last_verified_at) : "never"}</td>
     </tr>`;
     wrap.innerHTML = `<div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>License</th><th>Domains</th><th>Status</th><th>Expiry</th><th>Last verified</th></tr></thead>
-      <tbody>${d.licenses.map(row).join("")}</tbody></table></div>`;
+      <tbody>${rows.map(row).join("")}</tbody></table></div>`;
   };
   load().catch((e) => (wrap.innerHTML = errBox(e)));
   const create = qs("#lCreate");
   if (create) create.onclick = async () => {
-    const domains = qs("#lDomains").value.split("\n").map((s) => s.trim()).filter(Boolean);
+    const domains = (qs("#lDomains")?.value || "").split("\n").map((s) => s.trim()).filter(Boolean);
     if (!domains.length) return toast("Enter at least one authorized domain", "warn");
     try {
+      const sub = qs("#lSub");
       const d = await api("POST", "/api/v1/licenses", {
         project_id: p.id,
-        customer_name: qs("#lName").value.trim(),
-        customer_email: qs("#lEmail").value.trim(),
+        customer_name: qs("#lName")?.value?.trim() || "",
+        customer_email: qs("#lEmail")?.value?.trim() || "",
         domains,
-        allow_subdomains: qs("#lSub").checked,
-        expiry_days: parseInt(qs("#lDays").value, 10) || 365,
-        version_restrict: qs("#lVer").value.trim() || null,
+        allow_subdomains: !!(sub && sub.checked),
+        expiry_days: parseInt(qs("#lDays")?.value, 10) || 365,
+        version_restrict: qs("#lVer")?.value?.trim() || null,
       });
       const key = d.license.key;
       confirmModal({
@@ -515,10 +523,10 @@ async function bindLicenses(p, isAdmin) {
           <div class="callout">Give this key to the deployer. They enter it at /guard/activate on the authorized domain.</div>`,
         actions: [{ label: "Done", kind: "primary", onClick: () => { closeModals(); load(); router(); } }],
       });
-      qs("#copyKey").onclick = async () => {
+      qs("#copyKey") && (qs("#copyKey").onclick = async () => {
         try { await navigator.clipboard.writeText(key); toast("Copied", "ok"); }
         catch (e) { toast("Select the key manually to copy", "warn"); }
-      };
+      });
       load();
     } catch (e) { toast(e.message, "err"); }
   };
@@ -529,7 +537,7 @@ async function bindDomains(p, isAdmin) {
   if (!wrap) return;
   try {
     const d = await api("GET", "/api/v1/domains");
-    const rows = d.domains.filter((x) => x.project_id === p.id);
+    const rows = asList(d, "domains").filter((x) => x && x.project_id === p.id);
     if (!rows.length) {
       wrap.innerHTML = emptyState("globe", "No domains yet", "Domains are attached to licenses. Create a license in the Licenses tab.",
         `<a class="btn" href="#/projects/${esc(p.id)}?tab=licenses">Go to licenses</a>`);
@@ -553,14 +561,15 @@ async function bindEvents(p, isAdmin) {
   if (!wrap || !isAdmin) return;
   try {
     const d = await api("GET", `/api/v1/events?project_id=${p.id}&limit=200`);
-    if (!d.events.length) {
+    const eventRows = asList(d, "events");
+    if (!eventRows.length) {
       wrap.innerHTML = emptyState("shield", "No security events for this project", "Failures and tamper detections will be recorded here.");
       return;
     }
     wrap.innerHTML = `<div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Severity</th><th>Type</th><th>Detail</th><th>License</th><th>When</th></tr></thead>
-      <tbody>${d.events.map((e) => `<tr>
-        <td>${badge({ critical: "danger", warning: "warn", info: "info" }[e.severity], e.severity)}</td>
+      <tbody>${eventRows.map((e) => `<tr>
+        <td>${badge({ critical: "danger", warning: "warn", info: "info" }[e.severity] || "muted", e.severity)}</td>
         <td class="mono small">${esc(e.type)}</td>
         <td class="muted small">${esc(e.detail || "")}</td>
         <td class="mono small">${esc(e.license_id || "—")}</td>

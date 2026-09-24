@@ -12,6 +12,13 @@ const SFG = {
 /* ---------------- helpers ---------------- */
 const qs = (sel, root = document) => root.querySelector(sel);
 const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+/** Attach a handler only if the element exists (never throws on null). */
+function bind(sel, root, event, fn) {
+  if (typeof root === "string" || root == null) { fn = event; event = root; root = document; }
+  const el = qs(sel, root || document);
+  if (el && typeof fn === "function") el[event] = fn;
+  return el;
+}
 /** Always return a real array from an API payload (never null/undefined/object). */
 function asList(v, key) {
   if (Array.isArray(v)) return v;
@@ -147,15 +154,15 @@ function closeModals() {
   });
 }
 
-function confirmModal({ title, message, confirmLabel = "Confirm", danger = false, onConfirm }) {
+function confirmModal({ title, message, confirmLabel = "Confirm", danger = false, onConfirm, body, actions }) {
   const bd = modal({
     title,
-    body: `<p style="margin:0;color:var(--muted);font-size:13.5px">${esc(message)}</p>`,
-    actions: [
+    body: body || `<p style="margin:0;color:var(--muted);font-size:13.5px">${esc(message || "")}</p>`,
+    actions: actions || [
       { label: "Cancel", onClick: () => closeModals() },
       {
         label: confirmLabel, kind: danger ? "danger" : "primary",
-        onClick: () => { closeModals(); onConfirm(); },
+        onClick: () => { closeModals(); onConfirm && onConfirm(); },
       },
     ],
   });
@@ -168,7 +175,7 @@ function emptyState(icon, title, desc, actionHtml = "") {
 }
 
 function badge(cls, label) {
-  return `<span class="badge ${cls}">${esc(label || cls)}</span>`;
+  return `<span class="badge ${esc(cls || "muted")}">${esc(label || cls || "muted")}</span>`;
 }
 
 function errBox(err) {
@@ -193,6 +200,7 @@ async function router() {
     || (r.parts[0] === "builds" && r.parts[1] ? SFG.pages["/builds/:id"] : null);
   const content = qs(".content");
   const titleEl = qs(".topbar h1");
+  if (!content || !titleEl) return; // shell not rendered (login page)
   if (!page) {
     content.innerHTML = emptyState("alert", "Page not found", "The page you requested does not exist.",
       `<button class="btn" onclick="location.hash='#/dashboard'">Back to dashboard</button>`);
@@ -264,13 +272,19 @@ function renderShell() {
     </div>`;
   document.body.innerHTML = "";
   document.body.appendChild(root);
-  qs("#hamburger").onclick = () => { qs("#sidebar").classList.toggle("open"); qs("#scrim").classList.toggle("show"); };
-  qs("#scrim").onclick = () => { qs("#sidebar").classList.remove("open"); qs("#scrim").classList.remove("show"); };
-  qs("#logoutBtn").onclick = async () => {
+  bind("#hamburger", "onclick", () => {
+    qs("#sidebar")?.classList.toggle("open");
+    qs("#scrim")?.classList.toggle("show");
+  });
+  bind("#scrim", "onclick", () => {
+    qs("#sidebar")?.classList.remove("open");
+    qs("#scrim")?.classList.remove("show");
+  });
+  bind("#logoutBtn", "onclick", async () => {
     try { await api("POST", "/api/v1/auth/logout"); } catch (e) { }
     SFG.user = null; SFG.csrf = "";
     location.hash = "#/login";
-  };
+  });
 }
 
 /* ---------------- login page ---------------- */
@@ -294,20 +308,23 @@ async function loginPage() {
     </div>`;
   document.body.innerHTML = body;
   const qsT = (s) => document.querySelector(s);
-  qsT("#loginForm").onsubmit = async (e) => {
+  const loginForm = qsT("#loginForm");
+  if (loginForm) loginForm.onsubmit = async (e) => {
     e.preventDefault();
     const btn = qsT("#loginBtn");
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Signing in…';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Signing in…'; }
     try {
       const data = await api("POST", "/api/v1/auth/login", {
-        email: qsT("#le").value, password: qsT("#lp").value,
+        email: qsT("#le")?.value || "", password: qsT("#lp")?.value || "",
       });
       SFG.user = data.user; SFG.csrf = data.csrf;
       renderShell();
       location.hash = "#/dashboard";
+      router();
     } catch (err) {
-      qsT("#loginErr").innerHTML = errBox(err);
-      btn.disabled = false; btn.textContent = "Sign in";
+      const errEl = qsT("#loginErr");
+      if (errEl) errEl.innerHTML = errBox(err);
+      if (btn) { btn.disabled = false; btn.textContent = "Sign in"; }
     }
   };
   return { title: "Sign in" };
@@ -315,18 +332,21 @@ async function loginPage() {
 
 /* ---------------- boot ---------------- */
 async function boot() {
+  SFG.pages["/login"] = loginPage;
   try {
     const me = await api("GET", "/api/v1/auth/me");
     SFG.user = me.user; SFG.csrf = me.csrf;
   } catch (e) {
     SFG.user = null; SFG.csrf = "";
   }
-  window.addEventListener("hashchange", router);
+  window.addEventListener("hashchange", () => {
+    if (!SFG.user && location.hash !== "#/login") { loginPage(); return; }
+    router();
+  });
   if (!SFG.user) {
-    if (location.hash !== "#/login") location.hash = "#/login";
-    else loginPage();
+    loginPage();
+    if (location.hash && location.hash !== "#/login") location.hash = "#/login";
   } else {
-    SFG.pages["/login"] = loginPage;
     renderShell();
     router();
   }

@@ -46,8 +46,8 @@ SFG.pages["/dashboard"] = async () => {
 
   const projRow = (p) => `<tr>
     <td><a href="#/projects/${esc(p.id)}" class="mono" style="color:var(--accent)">${esc(p.id)}</a>
-        <div class="faint small">${esc(p.name)}</div></td>
-    <td>${badge("muted", p.status)}</td>
+        <div class="faint small">${esc(p.name || "")}</div></td>
+    <td>${badge("muted", p.status || "active")}</td>
     <td class="num">${p.file_count}</td>
     <td class="num">${p.license_count}</td>
     <td class="num">${p.build_count}</td>
@@ -87,12 +87,12 @@ SFG.pages["/projects"] = async (r) => {
   const isAdmin = ["super_admin", "admin"].includes(SFG.user.role);
   const row = (p) => `<tr>
     <td><a href="#/projects/${esc(p.id)}" class="mono" style="color:var(--accent)">${esc(p.id)}</a>
-      <div class="faint small">${esc(p.name)}</div></td>
+      <div class="faint small">${esc(p.name || "")}</div></td>
     <td>${badge(p.status === "active" ? "ok" : "muted", p.status)}</td>
-    <td>${badge("muted", p.protection_level)}</td>
-    <td class="num">${p.file_count}</td>
-    <td class="num">${p.license_count}</td>
-    <td class="num">${p.build_count}</td>
+    <td>${badge("muted", p.protection_level || "basic")}</td>
+    <td class="num">${p.file_count ?? 0}</td>
+    <td class="num">${p.license_count ?? 0}</td>
+    <td class="num">${p.build_count ?? 0}</td>
     <td class="mono">${esc(p.owner_email || "—")}</td>
     <td class="muted">${fmtDate(p.created_at)}</td>
     <td><div class="row-actions">
@@ -116,7 +116,7 @@ SFG.pages["/projects"] = async (r) => {
     onReady: () => {
       const inp = qs("#pq");
       let t;
-      inp.oninput = () => { clearTimeout(t); t = setTimeout(() => nav("/projects?q=" + encodeURIComponent(inp.value)), 350); };
+      if (inp) inp.oninput = () => { clearTimeout(t); t = setTimeout(() => nav("/projects?q=" + encodeURIComponent(inp.value)), 350); };
       qsa("[data-act=archive]").forEach((b) => (b.onclick = () => {
         const arch = b.dataset.status !== "archived";
         confirmModal({
@@ -182,30 +182,34 @@ SFG.pages["/upload"] = async () => {
       <div class="card" id="upResult" style="margin-top:16px;display:none"></div>`,
     onReady: () => {
       const projectId = () => qs("#upProject")?.value;
-      if (qs("#quickCreate")) qs("#quickCreate").onclick = async () => {
-        const name = qs("#quickName").value.trim();
+      qs("#quickCreate") && (qs("#quickCreate").onclick = async () => {
+        const name = qs("#quickName")?.value?.trim();
         if (!name) return toast("Enter a project name", "warn");
         try {
           const d = await api("POST", "/api/v1/projects", { name });
           const sel = qs("#upProject");
-          const opt = document.createElement("option");
-          opt.value = d.project.id; opt.textContent = d.project.id + " — " + d.project.name;
-          sel.appendChild(opt); sel.value = d.project.id;
+          if (sel) {
+            const opt = document.createElement("option");
+            opt.value = d.project.id; opt.textContent = d.project.id + " — " + d.project.name;
+            sel.appendChild(opt); sel.value = d.project.id;
+          }
           toast("Project created", "ok");
         } catch (e) { toast(e.message, "err"); }
-      };
+      });
 
       const result = (d) => {
         const el = qs("#upResult");
+        if (!el) return;
         el.style.display = "block";
+        const ss = d.scan_summary || {};
         el.innerHTML = `<h3>Upload complete</h3>
           <div class="detail-grid">
-            <div class="item"><div class="k">Files extracted</div><div class="v">${d.extracted}</div></div>
-            <div class="item"><div class="k">Files scanned</div><div class="v">${d.scan_summary.file_count}</div></div>
-            <div class="item"><div class="k">Sensitive files</div><div class="v">${d.scan_summary.sensitive_file_count}</div></div>
-            <div class="item"><div class="k">Credential-looking values</div><div class="v">${d.scan_summary.secret_finding_count} <span class="faint">(masked)</span></div></div>
+            <div class="item"><div class="k">Files extracted</div><div class="v">${d.extracted ?? 0}</div></div>
+            <div class="item"><div class="k">Files scanned</div><div class="v">${ss.file_count ?? 0}</div></div>
+            <div class="item"><div class="k">Sensitive files</div><div class="v">${ss.sensitive_file_count ?? 0}</div></div>
+            <div class="item"><div class="k">Credential-looking values</div><div class="v">${ss.secret_finding_count ?? 0} <span class="faint">(masked)</span></div></div>
           </div>
-          <div style="margin-top:16px;display:flex;gap:10px">
+          <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
             <a class="btn primary" href="#/projects/${esc(projectId())}?tab=scan">${I.search} View scan report</a>
             <a class="btn" href="#/projects/${esc(projectId())}?tab=protection">${I.shield} Configure protection</a>
           </div>`;
@@ -213,11 +217,13 @@ SFG.pages["/upload"] = async () => {
 
       /* --- ZIP upload --- */
       const dz = qs("#dz"), zipInput = qs("#zipInput");
-      dz.onclick = () => zipInput.click();
-      ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
-      ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
-      dz.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) doZip(f); });
-      zipInput.onchange = () => { if (zipInput.files[0]) doZip(zipInput.files[0]); };
+      if (dz && zipInput) {
+        dz.onclick = () => zipInput.click();
+        ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
+        ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
+        dz.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) doZip(f); });
+        zipInput.onchange = () => { if (zipInput.files[0]) doZip(zipInput.files[0]); };
+      }
 
       async function doZip(file) {
         const pid = projectId();
@@ -251,8 +257,8 @@ SFG.pages["/upload"] = async () => {
 
       /* --- folder upload --- */
       const dirInput = qs("#dirInput");
-      qs("#pickDir").onclick = () => dirInput.click();
-      dirInput.onchange = async () => {
+      bind("#pickDir", "onclick", () => dirInput?.click());
+      if (dirInput) dirInput.onchange = async () => {
         const files = Array.from(dirInput.files || []);
         const st = qs("#dirStatus");
         if (!files.length) return;

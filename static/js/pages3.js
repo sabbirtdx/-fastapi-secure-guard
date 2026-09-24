@@ -467,7 +467,7 @@ SFG.pages["/users"] = async () => {
             actions: [{ label: "Done", kind: "primary", onClick: () => closeModals() }],
           });
         } catch (e) { toast(e.message, "err"); }
-      };
+      });
       qsa("[data-ur]").forEach((b) => (b.onclick = () => {
         modal({
           title: "Change role",

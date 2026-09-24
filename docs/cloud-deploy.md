@@ -73,6 +73,10 @@ git push -u origin main
    |-----|----------------|
    | `SFG_ADMIN_EMAIL` | `you@gmail.com` |
    | `SFG_ADMIN_PASSWORD` | `a-long-random-password` |
+   | `SFG_AI_API_KEY` | `sk-…` (optional, permanent AI key — never commit) |
+   | `SFG_AI_BASE_URL` | `https://api.openai.com/v1` (optional) |
+   | `SFG_AI_MODEL` | `gpt-4o-mini` (optional) |
+   | `SFG_MAX_UPLOAD_MB` | `50` |
 
 5. **Create Web Service** → wait for build → open
    `https://<your-name>.onrender.com`.
@@ -83,9 +87,15 @@ git push -u origin main
 
 ### Render free-tier notes
 
-- Disk is **ephemeral**: redeploy/restart wipes `data/` (DB + keys). For a
-  durable demo, add a **Disk** (paid) and set `SFG_DATA_DIR=/data`.
+- Disk is **ephemeral**: redeploy/restart wipes `data/` (DB + keys + uploads).
+  **Before every deploy:** Settings → **Download backup.json**.  
+  **After redeploy:** Settings → **Restore backup…** (metadata restored; re-upload source ZIPs).
+- **Permanent AI key:** set env `SFG_AI_API_KEY` (and optional `SFG_AI_BASE_URL`,
+  `SFG_AI_MODEL`) in Render → Environment. Never commit keys to git.
 - First cold start can take ~30–60s (free instance sleeps).
+- Uploads: free tier request/memory is limited. Keep project ZIP ≤ 50 MB
+  (`SFG_MAX_UPLOAD_MB` default on Render blueprint). Large sites: zip only
+  source (no `node_modules`, no `.git`, no media dumps).
 
 ---
 
@@ -134,12 +144,16 @@ git push -u origin main
 
 | Symptom | Fix |
 |---------|-----|
-| Build fails on pip | Confirm `requirements.txt` is at repo root; Python 3.11+ |
+| Build fails on pip | Confirm `requirements.txt` is at repo root; set env `PYTHON_VERSION=3.12.8`; Build Command: `pip install --upgrade pip && pip install -r requirements.txt` |
+| Build fails / empty repo | Push from project root (`git status` must show `app/`, `requirements.txt`, `Procfile`) |
 | `ADDRESS already in use` / boot timeout | Start command must use `$PORT`, not hard-coded `8000` |
-| Login fails after redeploy (Render free) | Ephemeral disk wiped DB → env password re-seeds empty DB on next boot; log in again with same env credentials |
+| Login fails after redeploy (Render free) | Ephemeral disk wiped DB → env password re-seeds empty DB on next boot; log in again with same env credentials; restore backup.json for projects/licenses |
+| Upload fails (413 / timeout) | Lower ZIP size; set `SFG_MAX_UPLOAD_MB=50`; zip only source files |
+| Scan failed after upload | Project → Scan → Rescan; check Logs for the exception |
 | 500 on upload | Free plans often cap body size; raise plan or lower `SFG_MAX_UPLOAD_MB` |
 | Package verify fails from customer site | Set **License server URL** to the exact public HTTPS origin |
 | `credentials.txt` missing | Expected when `SFG_ADMIN_PASSWORD` is set — use the env password |
+| AI key lost after redeploy | Set `SFG_AI_API_KEY` env (synced into settings at every startup) |
 
 ---
 

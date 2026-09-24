@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config, crypto, db, pipeline
 from .routes import (auth, backups, builds, events, health, licenses,
                      projects, public, settings_routes, users)
+from .services import ai as ai_svc
 
 app = FastAPI(title="Secure File Guard", version=config.APP_VERSION,
               description="License, protect and verify website builds.",
@@ -34,6 +35,8 @@ async def startup():
     with contextlib.suppress(Exception):
         db.prune_old_logs()
     auth.seed_admin()
+    with contextlib.suppress(Exception):
+        ai_svc.ensure_ai_from_env()
 
 
 @app.exception_handler(Exception)

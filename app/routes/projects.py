@@ -1,10 +1,12 @@
 """Secure File Guard — project management + uploads (ZIP and direct folder)."""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import re
 import shutil
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -314,73 +316,119 @@ async def upload_zip(request: Request, project_id: str, file: UploadFile = File(
     filename = file.filename or "upload.zip"
     if not filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail={"code": "BAD_EXTENSION", "message": "Only .zip files are accepted."})
-    content_type = (file.content_type or "").lower()
-    if content_type and content_type not in ("application/zip", "application/x-zip-compressed",
-                                             "application/octet-stream", ""):
-        raise HTTPException(status_code=400, detail={"code": "BAD_MIME", "message": "Unrecognized ZIP MIME type."})
+    # MIME varies by browser/OS; accept common zip types + empty/unknown.
+    # Real validation is zipfile.ZipFile below.
 
     max_bytes = int(db.get_settings().get("max_upload_mb", str(MAX_FILE_MB))) * 1024 * 1024
-    data = await file.read()
-    if len(data) > max_bytes:
-        raise HTTPException(status_code=413, detail={"code": "TOO_LARGE", "message": f"File exceeds the {max_bytes // (1024*1024)} MB limit."})
-    if len(data) == 0:
+    # Stream to a temp file (large full-site ZIPs must not blow request memory).
+    tmp = config.TEMP_DIR / f"upload-{uuid.uuid4().hex}.zip"
+    config.ensure_dirs()
+    size = 0
+    try:
+        with open(tmp, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(status_code=413, detail={
+                        "code": "TOO_LARGE",
+                        "message": f"File exceeds the {max_bytes // (1024*1024)} MB limit. "
+                                   f"Lower the ZIP size or raise Max upload size in Settings."})
+                out.write(chunk)
+    except HTTPException:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+    except Exception:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail={
+            "code": "UPLOAD_FAILED", "message": "Could not read the uploaded file. Try again or use a smaller ZIP."})
+    if size == 0:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail={"code": "EMPTY", "message": "Uploaded file is empty."})
 
     try:
-        zf = zipfile.ZipFile(io.BytesIO(data))
-        bad = zf.testzip()
-        if bad is not None:
-            raise ValueError(f"corrupt member: {bad}")
+        with open(tmp, "rb") as fh:
+            zf = zipfile.ZipFile(fh)
+            bad = zf.testzip()
+            if bad is not None:
+                raise ValueError(f"corrupt member: {bad}")
+
+            infos = zf.infolist()
+            if len(infos) > config.MAX_ZIP_ENTRIES:
+                raise HTTPException(status_code=400, detail={"code": "TOO_MANY_FILES",
+                                                             "message": f"Archive has more than {config.MAX_ZIP_ENTRIES} files."})
+
+            # PHASE 1 — validate the entire archive before touching the workspace,
+            # so a rejected upload can never destroy a previously uploaded project.
+            validated: list[tuple] = []
+            seen: dict[str, str] = {}
+            total_uncompressed = 0
+            for info in infos:
+                if info.is_dir():
+                    continue
+                rel = _safe_zip_name(info.filename)
+                if rel is None:
+                    raise HTTPException(status_code=400, detail={"code": "PATH_TRAVERSAL",
+                                                                 "message": f"Archive entry with unsafe path rejected: {info.filename[:80]}"})
+                if info.external_attr >> 28 in (2, 3, 10):  # symlink/device
+                    raise HTTPException(status_code=400, detail={"code": "UNSAFE_ENTRY",
+                                                                 "message": "Archive contains a symlink or special file."})
+                total_uncompressed += info.file_size
+                if total_uncompressed > max_bytes * 4:
+                    raise HTTPException(status_code=400, detail={"code": "COMPRESSED_BOMB",
+                                                                 "message": "Archive decompression ratio exceeds safety limit."})
+                if rel in seen:
+                    raise HTTPException(status_code=400, detail={"code": "DUPLICATE_PATH",
+                                                                 "message": f"Duplicate path in archive: {rel}"})
+                seen[rel] = info.filename
+                validated.append((info, rel))
+
+            if not validated:
+                raise HTTPException(status_code=400, detail={"code": "EMPTY_ZIP",
+                                                             "message": "Archive contains no files."})
+
+            # PHASE 2 — archive is valid: replace the workspace and extract.
+            src = config.project_dir(p["id"]) / "source"
+            if src.exists():
+                shutil.rmtree(src)
+            src.mkdir(parents=True, exist_ok=True)
+
+            extracted = 0
+            for info, rel in validated:
+                dest = src / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as fin, open(dest, "wb") as fout:
+                    shutil.copyfileobj(fin, fout, length=1 << 20)
+                os_chmod_safe(dest)
+                extracted += 1
+    except HTTPException:
+        raise
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail={"code": "BAD_ZIP", "message": "Not a valid ZIP archive."})
     except ValueError as e:
         raise HTTPException(status_code=400, detail={"code": "BAD_ZIP", "message": f"Malformed archive: {e}"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={
+            "code": "EXTRACT_FAILED",
+            "message": f"Could not extract the archive ({e.__class__.__name__}). Try re-zipping the site without nested archives."})
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
-    infos = zf.infolist()
-    if len(infos) > config.MAX_ZIP_ENTRIES:
-        raise HTTPException(status_code=400, detail={"code": "TOO_MANY_FILES", "message": f"Archive has more than {config.MAX_ZIP_ENTRIES} files."})
-
-    # PHASE 1 — validate the entire archive before touching the workspace,
-    # so a rejected upload can never destroy a previously uploaded project.
-    validated: list[tuple] = []
-    seen: dict[str, str] = {}
-    total_uncompressed = 0
-    for info in infos:
-        if info.is_dir():
-            continue
-        rel = _safe_zip_name(info.filename)
-        if rel is None:
-            raise HTTPException(status_code=400, detail={"code": "PATH_TRAVERSAL", "message": f"Archive entry with unsafe path rejected: {info.filename[:80]}"})
-        if info.external_attr >> 28 in (2, 3, 10):  # symlink/device
-            raise HTTPException(status_code=400, detail={"code": "UNSAFE_ENTRY", "message": "Archive contains a symlink or special file."})
-        total_uncompressed += info.file_size
-        if total_uncompressed > max_bytes * 4:
-            raise HTTPException(status_code=400, detail={"code": "COMPRESSED_BOMB", "message": "Archive decompression ratio exceeds safety limit."})
-        if rel in seen:
-            raise HTTPException(status_code=400, detail={"code": "DUPLICATE_PATH", "message": f"Duplicate path in archive: {rel}"})
-        seen[rel] = info.filename
-        validated.append((info, rel))
-
-    if not validated:
-        raise HTTPException(status_code=400, detail={"code": "EMPTY_ZIP", "message": "Archive contains no files."})
-
-    # PHASE 2 — archive is valid: replace the workspace and extract.
-    src = config.project_dir(p["id"]) / "source"
-    if src.exists():
-        shutil.rmtree(src)
-    src.mkdir(parents=True, exist_ok=True)
-
-    extracted = 0
-    for info, rel in validated:
-        dest = src / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(info) as fin, open(dest, "wb") as fout:
-            shutil.copyfileobj(fin, fout, length=1 << 20)
-        os_chmod_safe(dest)
-        extracted += 1
-
-    # single-root stripping: if everything is under one top folder, keep it
-    report = scanner.scan_project(p["id"])
+    # Full-site scan + automatic builtin analysis so Build is ready immediately.
+    try:
+        report = scanner.scan_project(p["id"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={
+            "code": "SCAN_FAILED",
+            "message": f"Files uploaded but scan failed ({e.__class__.__name__}). Use Scan → Rescan."})
+    with contextlib.suppress(Exception):
+        analyzer.analyze_project(p["id"], force=True)
     _touch(p["id"])
     db.audit(user["id"], user["email"], "upload_zip", "project", p["id"],
              detail=f"{extracted} files from {filename[:60]}", ip=client_ip(request))
@@ -393,6 +441,7 @@ async def upload_zip(request: Request, project_id: str, file: UploadFile = File(
             "sensitive_file_count": report["sensitive_file_count"],
             "secret_finding_count": report["secret_finding_count"],
         },
+        "analyzed": True,
     }
 
 
@@ -473,6 +522,8 @@ async def folder_finish(request: Request, project_id: str):
         report = scanner.scan_project(p["id"])
     except Exception as e:
         raise HTTPException(status_code=500, detail={"code": "SCAN_FAILED", "message": f"Scan failed: {e.__class__.__name__}"})
+    with contextlib.suppress(Exception):
+        analyzer.analyze_project(p["id"], force=True)
     state_path.unlink(missing_ok=True)
     _touch(p["id"])
     db.audit(user["id"], user["email"], "upload_folder", "project", p["id"],
@@ -480,6 +531,7 @@ async def folder_finish(request: Request, project_id: str):
     return {
         "ok": True,
         "extracted": state["received"],
+        "analyzed": True,
         "scan_summary": {
             "file_count": report["file_count"],
             "by_kind": report["by_kind"],

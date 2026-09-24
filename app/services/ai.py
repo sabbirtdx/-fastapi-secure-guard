@@ -22,6 +22,28 @@ def is_configured() -> bool:
     return bool(s.get("ai_base_url")) and bool(s.get("ai_key_wrapped"))
 
 
+def ensure_ai_from_env() -> None:
+    """If SFG_AI_API_KEY is set in the environment, make it authoritative:
+    wrap and store it (and optional base URL/model) into settings at startup.
+    Keys are never printed or returned by any API."""
+    from .. import crypto as _crypto
+    key = config.AI_API_KEY
+    if not key:
+        return
+    try:
+        db.set_setting("ai_key_wrapped", _crypto.wrap_key(_crypto.master_key(), key.encode()), db.utcnow())
+        if config.AI_BASE_URL:
+            db.set_setting("ai_base_url", config.AI_BASE_URL.rstrip("/"), db.utcnow())
+        if config.AI_MODEL:
+            db.set_setting("ai_model", config.AI_MODEL, db.utcnow())
+        if not db.get_settings().get("ai_base_url"):
+            db.set_setting("ai_base_url", "https://api.openai.com/v1", db.utcnow())
+        if not db.get_settings().get("ai_model"):
+            db.set_setting("ai_model", "gpt-4o-mini", db.utcnow())
+    except Exception:
+        pass
+
+
 def unwrap_ai_key() -> str | None:
     s = db.get_settings()
     wrapped = s.get("ai_key_wrapped", "")

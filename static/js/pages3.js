@@ -742,7 +742,16 @@ SFG.pages["/settings"] = async () => {
             <input class="input mono" data-set="ai_model" value="${esc(s.ai_model)}" placeholder="gpt-4o-mini">
             <label class="f">API key ${s.ai_key_configured ? '<span class="badge ok">configured</span>' : ""}</label>
             <input class="input mono" id="aiKey" type="password" placeholder="${s.ai_key_configured ? "•••••••• (leave blank to keep)" : "sk-…"}">
-            <div class="callout">Stored AES-256-GCM wrapped with the server master key; never returned in cleartext. The LLM only ever receives an anonymized structural summary — never file contents or secrets.</div>
+            <div class="callout">Stored AES-256-GCM wrapped with the server master key; never returned in cleartext. On Render, prefer env <code>SFG_AI_API_KEY</code> (permanent across redeploys). The LLM only ever receives an anonymized structural summary — never file contents or secrets.</div>
+          </div>
+          <div class="card" style="margin-top:16px">
+            <h3>Backup (keep data after redeploy)</h3>
+            <div class="callout warn">Render free disk is wiped on redeploy/restart. Export a signed metadata backup before every deploy, then restore after login.</div>
+            <div class="row" style="gap:8px;flex-wrap:wrap">
+              <button class="btn" id="dlBackup">Download backup.json</button>
+              <label class="btn" style="cursor:pointer">Restore backup…<input type="file" id="upBackup" accept="application/json,.json" style="display:none"></label>
+            </div>
+            <div class="faint small" id="backupMsg" style="margin-top:8px"></div>
           </div>
           <div style="margin-top:16px"><button class="btn primary" id="saveSettings">Save settings</button>
           <span class="faint small" id="saveMsg" style="margin-left:10px"></span></div>
@@ -759,6 +768,34 @@ SFG.pages["/settings"] = async () => {
           qs("#saveMsg").textContent = "Saved: " + r.changed.join(", ");
           toast("Settings saved", "ok");
         } catch (e) { toast(e.message, "err"); }
+      };
+
+      qs("#dlBackup").onclick = async () => {
+        try {
+          const r = await fetch("/api/v1/backup/export", { credentials: "include" });
+          if (!r.ok) throw new Error("Backup export failed");
+          const blob = await r.blob();
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "sfg-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+          a.click();
+          URL.revokeObjectURL(a.href);
+          qs("#backupMsg").textContent = "Downloaded. Keep this file safe.";
+          toast("Backup downloaded", "ok");
+        } catch (e) { toast(e.message, "err"); }
+      };
+
+      qs("#upBackup").onchange = async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const bundle = JSON.parse(text);
+          const r = await api("POST", "/api/v1/backup/restore", bundle);
+          qs("#backupMsg").textContent = "Restored " + (r.entry_count || 0) + " entries.";
+          toast("Backup restored", "ok");
+          router();
+        } catch (err) { toast(err.message || "Restore failed", "err"); }
       };
     },
   };

@@ -4,13 +4,23 @@ services:
     name: secure-file-guard
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
     envVars:
       - key: SFG_ADMIN_EMAIL
         sync: false
       - key: SFG_ADMIN_PASSWORD
         sync: false
+      # Permanent AI key: set once in Render Dashboard → Environment.
+      # Never commit keys to git.
+      - key: SFG_AI_API_KEY
+        sync: false
+      - key: SFG_AI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: SFG_AI_MODEL
+        value: gpt-4o-mini
+      - key: SFG_MAX_UPLOAD_MB
+        value: "50"
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: "3.12.8"
     healthCheckPath: /api/healthz

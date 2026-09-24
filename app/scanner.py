@@ -170,7 +170,10 @@ def scan_project(project_id: str) -> dict:
                 truncated = True
                 break
             full = Path(root) / fn
-            relpath = full.relative_to(src).as_posix()
+            try:
+                relpath = full.relative_to(src).as_posix()
+            except ValueError:
+                continue
             try:
                 size = full.stat().st_size
             except OSError:
@@ -179,10 +182,15 @@ def scan_project(project_id: str) -> dict:
             try:
                 digest = sha256_file(full)
             except OSError:
+                digest = ""
+            head = b""
+            kind = "other"
+            try:
+                with open(full, "rb") as f:
+                    head = f.read(8192)
+                kind = classify(full, relpath, head)
+            except OSError:
                 continue
-            with open(full, "rb") as f:
-                head = f.read(8192)
-            kind = classify(full, relpath, head)
             stats[kind] = stats.get(kind, 0) + 1
             sensitive_reasons = sensitive_path_reasons(relpath)
             secret_count = 0
@@ -209,6 +217,8 @@ def scan_project(project_id: str) -> dict:
             rows.append((project_id, relpath, size, digest, kind,
                          1 if (sensitive_reasons or secret_count) else 0,
                          secret_count, db.utcnow()))
+        if truncated:
+            break
 
     # Replace previous index for this project
     with db.db() as c:

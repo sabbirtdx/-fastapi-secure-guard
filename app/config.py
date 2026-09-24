@@ -46,6 +46,12 @@ ADMIN_EMAIL = os.environ.get("SFG_ADMIN_EMAIL", "admin@securefileguard.local")
 # super admin (seeded or re-synced at startup) and no credentials file is written.
 ADMIN_PASSWORD = os.environ.get("SFG_ADMIN_PASSWORD") or None
 
+# Optional AI/LLM (authoritative when set — re-synced into settings at startup).
+# Never commit real keys; set them only in the host environment (Render/Railway).
+AI_API_KEY = os.environ.get("SFG_AI_API_KEY") or None
+AI_BASE_URL = os.environ.get("SFG_AI_BASE_URL") or ""
+AI_MODEL = os.environ.get("SFG_AI_MODEL") or ""
+
 
 def ensure_dirs() -> None:
     for d in (DATA_DIR, KEYS_DIR, PROJECTS_DIR, TEMP_DIR, STATIC_DIR):

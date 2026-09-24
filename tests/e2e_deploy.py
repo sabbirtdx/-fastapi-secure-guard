@@ -114,9 +114,9 @@ try:
     st, out, hdrs = deploy_req("POST", "/guard/activate.php", host="evil.com", data={"license_key": KEY})
     check("wrong domain rejected on activation", st == 200 and "DOMAIN_NOT_AUTHORIZED" in out, f"status={st}")
 
-    # 5. correct key + correct domain activates
+    # 5. correct key + correct domain activates (200 continue page, not Location: /)
     st, out, hdrs = deploy_req("POST", "/guard/activate.php", host="example.com", data={"license_key": KEY})
-    check("activation succeeds", st == 302 and hdrs.get("Location") == "/", f"status={st} loc={hdrs.get('Location')}")
+    check("activation succeeds", st == 200 and "License activated" in out, f"status={st}")
     check("license key persisted (600)", (DEPLOY / "guard" / "license.key").exists() and
           oct(os.stat(DEPLOY / "guard" / "license.key").st_mode & 0o777) == "0o600")
 

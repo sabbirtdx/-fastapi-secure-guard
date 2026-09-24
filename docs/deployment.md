@@ -6,8 +6,10 @@ shipped inside `guard/` in every package.
 
 ## Prerequisites on the deployment host
 
-- **PHP 8.1+** with the **openssl** and **sodium** (libsodium) extensions —
-  the runtime verifies Ed25519 signatures with libsodium.
+- **PHP 7.4+** (8.x recommended) with the **openssl** and **sodium**
+  (libsodium) extensions — the runtime verifies Ed25519 signatures with
+  libsodium. On free panels (ProFreeHost etc.) set PHP to **8.1+** if
+  available; 7.4 works via polyfills in `guard.php`.
   (`apt install php8.x-cli php8.x-sodium` etc., depending on distro.)
 - A web server (Apache/Nginx + PHP-FPM, or plain `php -S` for local
   checks) whose **document root is the extracted package directory**.
@@ -141,6 +143,7 @@ authorization continues for `grace_seconds` (0 = none). Explicit denials
 | 503 `ACTIVATION_FAILED` | Not activated yet — open `/guard/activate.php` and enter the key |
 | 503 `HTTP_REQUIRED` | Build requires HTTPS; configure a TLS termination |
 | 500 `BUILD_INVALID` (sodium) | PHP on this host lacks the sodium extension — install `php-sodium` |
+| Browser **HTTP 500 / page isn't working** | PHP fatal/parse error or host rejects `.htaccess` / `.user.ini`. Package no longer ships those; **delete any old ones on the host**. Host panel → PHP **8.1+** (7.4+ works). Confirm `guard/` + `index.php` at domain root (not nested). Open `https://SITE/guard/activate.php` |
 | Activation / runtime `BUILD_INVALID` | Empty License server URL baked into an old package, build id not on the server, or build not `completed`. On the platform: set Settings → License server URL → rebuild → redeploy the new ZIP; confirm Builds status is `completed` |
 | Activation 4xx with `REPLAY_REJECTED` | System clock on the host is skewed > tolerance — fix NTP |
 

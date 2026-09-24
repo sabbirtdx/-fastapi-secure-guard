@@ -25,8 +25,43 @@
  * Honest limitations: a party with root access to this host can always read
  * or delete these files. The goal is that unauthorized modification or
  * copying does not result in successful authorized execution.
+ *
+ * Compatibility: written for PHP 7.4+ (ProFreeHost and similar free hosts)
+ * with polyfills for 8.x helpers. sodium (libsodium) is required at runtime.
  */
 declare(strict_types=1);
+
+// Double-include guard: index.php + activate.php / auto_prepend may both load this file.
+if (defined('SFG_GUARD_BOOTSTRAPPED')) {
+    return;
+}
+define('SFG_GUARD_BOOTSTRAPPED', 1);
+
+if (!function_exists('array_is_list')) {
+    function array_is_list(array $array): bool
+    {
+        if ($array === []) {
+            return true;
+        }
+        return array_keys($array) === range(0, count($array) - 1);
+    }
+}
+if (!function_exists('str_starts_with')) {
+    function str_starts_with(string $haystack, string $needle): bool
+    {
+        return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
+    }
+}
+if (!function_exists('str_ends_with')) {
+    function str_ends_with(string $haystack, string $needle): bool
+    {
+        if ($needle === '') {
+            return true;
+        }
+        $len = strlen($needle);
+        return substr($haystack, -$len) === $needle;
+    }
+}
 
 final class SFG
 {
@@ -195,7 +230,7 @@ final class SFG
         }
         try {
             return sodium_crypto_sign_verify_detached($sig, $msg, $pub);
-        } catch (SodiumException) {
+        } catch (\Throwable $e) {
             return false;
         }
     }
@@ -228,12 +263,12 @@ final class SFG
      * recursive key sort, compact separators, unescaped slashes, ASCII.
      * (Manifest keys/values are guaranteed ASCII by the build pipeline.)
      */
-    private static function canonicalJson(mixed $obj): string
+    private static function canonicalJson($obj): string
     {
         return self::canonical($obj);
     }
 
-    private static function canonical(mixed $obj): string
+    private static function canonical($obj): string
     {
         if (is_array($obj)) {
             if (array_is_list($obj)) {
@@ -591,7 +626,7 @@ final class SFG
                 'domain' => self::$lastHost,
                 'detail' => self::truncDetail($detail, 300),
             ], []);
-        } catch (Throwable) {
+        } catch (\Throwable $e) {
             // best effort only
         }
     }
@@ -921,7 +956,7 @@ HTML;
 
     private static function messageFor(string $code): string
     {
-        return match ($code) {
+        $map = array(
             'LICENSE_INVALID' => 'The license key is not valid.',
             'LICENSE_EXPIRED' => 'This license has expired.',
             'LICENSE_REVOKED' => 'This license has been revoked.',
@@ -936,8 +971,8 @@ HTML;
             'ACTIVATION_FAILED' => 'Activation failed.',
             'SERVER_UNAVAILABLE' => 'The licensing server is unavailable. If the grace period has elapsed, the protected application cannot start.',
             'HTTP_REQUIRED' => 'HTTPS is required for this deployment.',
-            default => 'Authorization failed.',
-        };
+        );
+        return isset($map[$code]) ? $map[$code] : 'Authorization failed.';
     }
 
     private static function halt(string $code, string $message, int $httpStatus): void

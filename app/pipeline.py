@@ -345,6 +345,11 @@ def protection(ctx: BuildContext) -> None:
         parts = rel.split("/")
         if parts[0] in SKIP_DIR_NAMES or ".git/" in f"{rel}/":
             continue
+        # Never ship host config from the source project: rewrite .htaccess /
+        # .user.ini auto_prepend commonly cause HTTP 500 on free panels.
+        base = Path(rel).name
+        if base in (".htaccess", ".htpasswd", ".user.ini", "web.config"):
+            continue
         if rel in prot_set:
             continue  # replaced below
         dest = ctx.package_tree / rel
@@ -559,30 +564,31 @@ def _copy_guard_runtime(ctx: BuildContext) -> None:
     ctx.guard_dir.mkdir(parents=True, exist_ok=True)
     for fn in ("guard.php", "activate.php", "activate.html.tpl"):
         shutil.copy2(tpl / fn, ctx.guard_dir / fn)
-    # Extensionless /guard/activate works only with a rewrite; without it,
-    # hosts like ProFreeHost return their branded 404 on the form POST.
-    htaccess = (
-        "<IfModule mod_rewrite.c>\n"
-        "RewriteEngine On\n"
-        "RewriteCond %{REQUEST_FILENAME} !-f\n"
-        "RewriteCond %{REQUEST_FILENAME} !-d\n"
-        "RewriteRule ^guard/activate/?$ guard/activate.php [L,QSA]\n"
-        "</IfModule>\n"
-    )
-    (ctx.package_tree / ".htaccess").write_text(htaccess)
+    # No .htaccess: RewriteEngine/Options in .htaccess cause HTTP 500 on hosts
+    # that restrict AllowOverride (ProFreeHost and many free panels).
+    # Activation form posts to itself (action="") — no rewrite required.
+    # If a previous build left one in package_tree, remove it.
+    old = ctx.package_tree / ".htaccess"
+    try:
+        if old.is_file():
+            old.unlink()
+    except OSError:
+        pass
     readme = (
         "# Secure File Guard — protected deployment\n\n"
         f"Project: {ctx.project_id} · Build: {ctx.build_id} · Version: {ctx.version}\n\n"
         "## Install\n"
         "1. Upload this package to the authorized server.\n"
-        "2. Point the web root at the package directory.\n"
-        "3. Ensure every PHP entry file includes the guard. Simplest: add\n"
-        "   `php_value auto_prepend_file guard/guard.php` (Apache) or set `auto_prepend_file`\n"
-        "   in php.ini to `guard/guard.php`. For specific entries, add\n"
-        "   `require __DIR__ . '/guard/guard.php';` at the top.\n"
-        "4. Open https://your-domain/guard/activate.php and enter the license key.\n"
-        "   (If files are in a subdirectory, use https://your-domain/subdir/guard/activate.php.\n"
-        "   The activation form posts to itself — no rewrite rules are required.)\n\n"
+        "2. Point the web root at the package directory\n"
+        "   (guard/, components/, index.php must sit at the domain root).\n"
+        "3. PHP 7.4+ (8.1 recommended) with the sodium extension.\n"
+        "   Do not add rewrite .htaccess rules — they often cause HTTP 500\n"
+        "   on free hosts. The activation form posts to itself.\n"
+        "4. Ensure every PHP entry file includes the guard. Simplest: add\n"
+        "   `require __DIR__ . '/guard/guard.php';` at the top of index.php\n"
+        "   (protected stubs already do this).\n"
+        "5. Open https://your-domain/guard/activate.php and enter the license key.\n"
+        "   (If files are in a subdirectory, use https://your-domain/subdir/guard/activate.php.)\n\n"
         "## Protected components\n"
         "Protected PHP files are one-line stubs that stream the real (obfuscated)\n"
         "source from the licensing server through an authenticated, signed channel.\n"

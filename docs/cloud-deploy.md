@@ -159,6 +159,7 @@ git push -u origin main
 | Package verify fails from customer site | Set **License server URL** to the exact public HTTPS origin |
 | Customer site shows **BUILD_INVALID: This build is invalid…** | Cause: empty License server URL in an old package, or build missing/`completed` status lost after disk wipe. **Fix:** Settings → License server URL → Save → rebuild package → re-download ZIP → re-upload to host → open `/guard/activate.php`. Check Builds tab shows status `completed` for the package's build id. After redeploy: restore `backup.json` so builds/licenses return |
 | Customer site shows **ProFreeHost 404** after license key | Host 404 (not SFG) = POST left the package. Rebuild + re-download package (form now posts to itself; success page no longer redirects to `/`). Unzip so `guard/`, `components/`, `index.php` sit at the domain root (not inside a nested folder). Open `https://SITE/guard/activate.php` directly |
+| Customer site shows **HTTP 500** | Delete any old `.htaccess` / `.user.ini` on the host (rewrite rules 500 free panels). Rebuild package (no longer ships rewrite `.htaccess`). Host panel → PHP **8.1+** (7.4+ works). Confirm files at domain root. Open `https://SITE/guard/activate.php` |
 | `credentials.txt` missing | Expected when `SFG_ADMIN_PASSWORD` is set — use the env password |
 | AI key lost after redeploy | Set `SFG_AI_API_KEY` env (synced into settings at every startup) |
 

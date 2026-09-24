@@ -53,12 +53,11 @@ final class SFG
         self::selfIntegrityCheck();
 
         $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-        // The activation page is a real, executable file (guard/activate.php)
-        // so it works under plain PHP/Apache document roots with no rewrite
-        // rules. /guard/activate (extensionless) is also accepted in case a
-        // web-server rewrite maps it there.
-        if ($uri === '/guard/activate' || $uri === '/guard/activate/'
-            || $uri === '/guard/activate.php' || $uri === '/guard/activate/index.php') {
+        // Accept activation under any install prefix (/, /subdir/, subdomain
+        // root) and with or without .php / rewrite. Exact-only matching broke
+        // subdirectory installs; absolute form actions caused host 404s.
+        if (preg_match('#(?:^|/)guard/activate(?:\.php)?/?$#', $uri)
+            || preg_match('#(?:^|/)guard/activate/index\.php$#', $uri)) {
             self::handleActivation();
             return;
         }
@@ -66,6 +65,26 @@ final class SFG
         if (!self::authorized()) {
             return; // authorized() halts with a professional error
         }
+    }
+
+    /** URL of the activation page under any install prefix (docroot or subdirectory). */
+    private static function activateUrl(): string
+    {
+        $docRoot = rtrim(str_replace('\\', '/', (string) ($_SERVER['DOCUMENT_ROOT'] ?? '')), '/');
+        $guardDir = str_replace('\\', '/', dirname(__FILE__));
+        if ($docRoot !== '' && str_starts_with($guardDir, $docRoot)) {
+            $prefix = substr($guardDir, strlen($docRoot));
+            if (str_ends_with($prefix, '/guard')) {
+                $prefix = substr($prefix, 0, -strlen('/guard'));
+            }
+            return $prefix . '/guard/activate.php';
+        }
+        $script = (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+        $dir = str_replace('\\', '/', dirname($script));
+        if ($dir === '/' || $dir === '' || $dir === '.') {
+            $dir = '';
+        }
+        return $dir . '/guard/activate.php';
     }
 
     // ------------------------------------------------------------------
@@ -334,8 +353,14 @@ final class SFG
 
         $key = self::licenseKey();
         if ($key === null) {
-            header('Location: /guard/activate.php', true, 302);
+            header('Location: ' . self::activateUrl(), true, 302);
             exit;
+        }
+        // license_server missing/empty → fail with a clear message (never
+        // silently 404 on the customer host when POSTing to the wrong base).
+        if (trim((string) (self::cfg()['license_server'] ?? '')) === '') {
+            self::halt('BUILD_INVALID',
+                'License server URL is not set in this build. Set Settings → License server URL, rebuild, and redeploy.', 503);
         }
 
         // Fresh verification against the licensing server.
@@ -591,7 +616,36 @@ final class SFG
                         @file_put_contents($keyPath, $key, LOCK_EX);
                         @chmod($keyPath, 0600);
                         self::writeCache($token);
-                        header('Location: /', true, 302);
+                        // Relative continue (never Location: /) — ProFreeHost and
+                        // subdirectory installs 404 a missing domain-root index.
+                        http_response_code(200);
+                        header('Content-Type: text/html; charset=utf-8');
+                        $okMsg = htmlspecialchars(
+                            'License activated for ' . self::$lastHost . '. Opening the application…',
+                            ENT_QUOTES);
+                        echo <<<HTML
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="1;url=../">
+<title>Secure File Guard — Activated</title>
+<style>
+ body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+   background: radial-gradient(1200px 600px at 70% -10%, #16233d 0%, #0b0f17 55%);
+   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+   color:#e6edf7; padding:24px; }
+ .card { width:100%; max-width:460px; background:#101827; border:1px solid rgba(52,211,153,.25);
+   border-radius:14px; padding:34px 32px; text-align:center; }
+ h1 { font-size:20px; margin:0 0 8px; font-weight:650; }
+ p { color:#93a1b8; font-size:13.5px; line-height:1.6; margin:0 0 18px; }
+ a { color:#38bdf8; font-weight:600; }
+</style></head>
+<body><div class="card">
+ <h1>License activated</h1>
+ <p>{$okMsg}</p>
+ <p><a href="../">Continue to the application</a></p>
+</div></body></html>
+HTML;
                         exit;
                     }
                 } else {

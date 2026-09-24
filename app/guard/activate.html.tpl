@@ -42,7 +42,7 @@
   <p class="sub">Enter the license / API key issued for this build to authorize the application on
   <strong>__DOMAIN__</strong>. Verification is performed by the licensing server, which checks the
   license, this domain, the signature and build integrity.</p>
-  <form method="post" action="/guard/activate">
+  <form method="post" action="">
     <label for="lk">License / API key</label>
     <input type="text" id="lk" name="license_key" required autocomplete="off" spellcheck="false"
       placeholder="SFG-XXXX-XXXX-XXXX-XXXX">

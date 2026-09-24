@@ -156,6 +156,7 @@ git push -u origin main
 | Scan failed after upload | Project → Scan → Rescan; check Logs for the exception |
 | 500 on upload | Free plans often cap body size; raise plan or lower `SFG_MAX_UPLOAD_MB` |
 | Package verify fails from customer site | Set **License server URL** to the exact public HTTPS origin |
+| Customer site shows **ProFreeHost 404** after license key | Host 404 (not SFG) = POST left the package. Rebuild + re-download package (form now posts to itself; success page no longer redirects to `/`). Unzip so `guard/`, `components/`, `index.php` sit at the domain root (not inside a nested folder). Open `https://SITE/guard/activate.php` directly |
 | `credentials.txt` missing | Expected when `SFG_ADMIN_PASSWORD` is set — use the env password |
 | AI key lost after redeploy | Set `SFG_AI_API_KEY` env (synced into settings at every startup) |
 

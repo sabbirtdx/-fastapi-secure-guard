@@ -545,6 +545,17 @@ def _copy_guard_runtime(ctx: BuildContext) -> None:
     ctx.guard_dir.mkdir(parents=True, exist_ok=True)
     for fn in ("guard.php", "activate.php", "activate.html.tpl"):
         shutil.copy2(tpl / fn, ctx.guard_dir / fn)
+    # Extensionless /guard/activate works only with a rewrite; without it,
+    # hosts like ProFreeHost return their branded 404 on the form POST.
+    htaccess = (
+        "<IfModule mod_rewrite.c>\n"
+        "RewriteEngine On\n"
+        "RewriteCond %{REQUEST_FILENAME} !-f\n"
+        "RewriteCond %{REQUEST_FILENAME} !-d\n"
+        "RewriteRule ^guard/activate/?$ guard/activate.php [L,QSA]\n"
+        "</IfModule>\n"
+    )
+    (ctx.package_tree / ".htaccess").write_text(htaccess)
     readme = (
         "# Secure File Guard — protected deployment\n\n"
         f"Project: {ctx.project_id} · Build: {ctx.build_id} · Version: {ctx.version}\n\n"
@@ -555,7 +566,9 @@ def _copy_guard_runtime(ctx: BuildContext) -> None:
         "   `php_value auto_prepend_file guard/guard.php` (Apache) or set `auto_prepend_file`\n"
         "   in php.ini to `guard/guard.php`. For specific entries, add\n"
         "   `require __DIR__ . '/guard/guard.php';` at the top.\n"
-        "4. Open https://your-domain/guard/activate and enter the license key.\n\n"
+        "4. Open https://your-domain/guard/activate.php and enter the license key.\n"
+        "   (If files are in a subdirectory, use https://your-domain/subdir/guard/activate.php.\n"
+        "   The activation form posts to itself — no rewrite rules are required.)\n\n"
         "## Protected components\n"
         "Protected PHP files are one-line stubs that stream the real (obfuscated)\n"
         "source from the licensing server through an authenticated, signed channel.\n"

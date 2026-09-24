@@ -382,6 +382,7 @@ final class SFG
         }
 
         $code = (string) ($resp['code'] ?? 'SERVER_UNAVAILABLE');
+        $srvMsg = trim((string) ($resp['message'] ?? ''));
 
         // Grace period: a previously successful authorization may continue for
         // a bounded window ONLY while the licensing server is unreachable.
@@ -397,7 +398,7 @@ final class SFG
         }
 
         self::noteFailure($code);
-        self::halt($code, self::messageFor($code), 503);
+        self::halt($code, $srvMsg !== '' ? $srvMsg : self::messageFor($code), 503);
         return false;
     }
 
@@ -420,7 +421,12 @@ final class SFG
         $cfg = self::cfg();
         $server = rtrim((string) ($cfg['license_server'] ?? ''), '/');
         if ($server === '') {
-            return ['ok' => false, 'code' => 'BUILD_INVALID', 'message' => 'License server not configured.'];
+            return [
+                'ok' => false,
+                'code' => 'BUILD_INVALID',
+                'message' => 'License server URL is not set in this build. '
+                    . 'On the licensing server: Settings → License server URL → save → rebuild → redeploy this package.',
+            ];
         }
         $body = [
             'license' => $key,
@@ -649,8 +655,12 @@ HTML;
                         exit;
                     }
                 } else {
-                    $error = ($resp['code'] ?? 'ACTIVATION_FAILED') . ': '
-                        . self::messageFor((string) ($resp['code'] ?? 'ACTIVATION_FAILED'));
+                    // Prefer the licensing server's real message (e.g. missing
+                    // build, empty license_server URL) over the generic
+                    // messageFor() string that used to hide the cause.
+                    $srvMsg = trim((string) ($resp['message'] ?? ''));
+                    $code = (string) ($resp['code'] ?? 'ACTIVATION_FAILED');
+                    $error = $code . ': ' . ($srvMsg !== '' ? $srvMsg : self::messageFor($code));
                 }
                 // A failed attempt never leaves a key stored (docs contract).
             }
@@ -919,7 +929,8 @@ HTML;
             'DOMAIN_NOT_AUTHORIZED' => 'Domain not authorized for this license.',
             'SIGNATURE_INVALID' => 'Cryptographic signature verification failed.',
             'INTEGRITY_FAILED' => 'Build integrity verification failed.',
-            'BUILD_INVALID' => 'This build is invalid or has been disabled.',
+            'BUILD_INVALID' => 'This build is invalid or was not found on the license server. '
+                . 'Set Settings → License server URL, rebuild the project, and deploy the new package.',
             'VERSION_NOT_ALLOWED' => 'This build version is not allowed by the license.',
             'PROJECT_MISMATCH' => 'License does not match this project.',
             'ACTIVATION_FAILED' => 'Activation failed.',

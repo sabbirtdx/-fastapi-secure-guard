@@ -25,8 +25,9 @@ def export_backup() -> dict:
             "projects": rows("SELECT * FROM projects"),
             "project_files": rows("SELECT project_id, relpath, size, sha256, kind, sensitive, secret_count FROM project_files"),
             "project_versions": rows("SELECT * FROM project_versions"),
-            "builds": rows("SELECT id, project_id, version, status, config_json, manifest_json, package_sha256,"
-                            " validation_report_json, created_at, completed_at FROM builds"),
+            "builds": rows("SELECT id, project_id, version_id, version, status, stage_index, total_stages,"
+                            " config_json, manifest_json, package_sha256, validation_report_json,"
+                            " created_at, completed_at FROM builds"),
             "licenses": rows("SELECT * FROM licenses"),
             "license_domains": rows("SELECT * FROM license_domains"),
             "security_events": rows("SELECT * FROM security_events ORDER BY id DESC LIMIT 5000"),
@@ -145,11 +146,14 @@ def _restore_rows(data: dict, bundle: dict, actor: dict) -> dict:
                         pass
             elif table == "builds":
                 for r in rows:
-                    c.execute("INSERT OR IGNORE INTO builds (id, project_id, version, status, stage_index,"
-                              " total_stages, config_json, manifest_json, package_sha256, validation_report_json,"
-                              " created_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                              (r["id"], r["project_id"], r["version"], r["status"], r.get("stage_index", 0),
-                               r.get("total_stages", 12), r.get("config_json"), r.get("manifest_json"),
+                    # Preserve status so license verify still sees completed builds
+                    # after a Render disk wipe + restore (BUILD_INVALID otherwise).
+                    c.execute("INSERT OR IGNORE INTO builds (id, project_id, version_id, version, status,"
+                              " stage_index, total_stages, config_json, manifest_json, package_sha256,"
+                              " validation_report_json, created_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                              (r["id"], r["project_id"], r.get("version_id"), r["version"], r["status"],
+                               r.get("stage_index", 0), r.get("total_stages", 12),
+                               r.get("config_json") or "{}", r.get("manifest_json"),
                                r.get("package_sha256"), r.get("validation_report_json"),
                                r["created_at"], r.get("completed_at")))
                     n += 1

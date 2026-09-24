@@ -755,7 +755,7 @@ SFG.pages["/settings"] = async () => {
         <div class="card">
           <h3>Platform</h3>
           ${field("site_name", "Site name")}
-          ${field("license_server_url", "License server base URL (empty = auto-detect from request)", "text", "https://license.example.com")}
+          ${field("license_server_url", "License server URL (required before build — e.g. https://your-app.onrender.com)", "text", "https://your-app.onrender.com")}
           <label class="f">HTTPS enforcement for protected deployments</label>
           <select class="input" data-set="require_https" style="max-width:160px">
             <option value="1" ${s.require_https === "1" ? "selected" : ""}>required</option>

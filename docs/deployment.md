@@ -82,7 +82,8 @@ proof the runtime boots and fails closed before activation.
 
 If activation fails, the page shows the **real** reason as a stable code
 (`LICENSE_INVALID`, `LICENSE_EXPIRED`, `LICENSE_REVOKED`,
-`LICENSE_SUSPENDED`, `DOMAIN_NOT_AUTHORIZED`, `SERVER_UNAVAILABLE`, …).
+`LICENSE_SUSPENDED`, `DOMAIN_NOT_AUTHORIZED`, `BUILD_INVALID`,
+`SERVER_UNAVAILABLE`, …) plus the licensing server's detail message.
 A failed attempt never leaves a key stored.
 
 ## What happens on every request
@@ -140,6 +141,7 @@ authorization continues for `grace_seconds` (0 = none). Explicit denials
 | 503 `ACTIVATION_FAILED` | Not activated yet — open `/guard/activate.php` and enter the key |
 | 503 `HTTP_REQUIRED` | Build requires HTTPS; configure a TLS termination |
 | 500 `BUILD_INVALID` (sodium) | PHP on this host lacks the sodium extension — install `php-sodium` |
+| Activation / runtime `BUILD_INVALID` | Empty License server URL baked into an old package, build id not on the server, or build not `completed`. On the platform: set Settings → License server URL → rebuild → redeploy the new ZIP; confirm Builds status is `completed` |
 | Activation 4xx with `REPLAY_REJECTED` | System clock on the host is skewed > tolerance — fix NTP |
 
 ## Uninstall

@@ -210,19 +210,27 @@ def verify_request(body: dict, ip: str) -> dict:
     # build + version checks
     build = db.q1("SELECT * FROM builds WHERE id = ? AND project_id = ?", (build_id, lic["project_id"])) if build_id else None
     if build is None:
-        _fail(result, "BUILD_INVALID", "This build is invalid or has been disabled.",
-              lic, claimed_domain, project, build_id, ip, t0)
+        if not build_id:
+            _fail(result, "BUILD_INVALID",
+                  "This package has no build id. Rebuild the project and redeploy the new ZIP.",
+                  lic, claimed_domain, project, build_id, ip, t0)
+        else:
+            _fail(result, "BUILD_INVALID",
+                  f"Build {build_id} was not found on the license server (database was reset or the build was deleted). "
+                  "Restore backup or rebuild, then redeploy the new package.",
+                  lic, claimed_domain, project, build_id, ip, t0)
         return result
     if build["status"] == "failed":
-        _fail(result, "BUILD_INVALID", "This build did not pass validation.",
+        _fail(result, "BUILD_INVALID", f"Build {build_id} did not pass validation.",
               lic, claimed_domain, project, build_id, ip, t0)
         return result
     if build["status"] == "disabled":
-        _fail(result, "BUILD_INVALID", "This build has been disabled by an administrator.",
+        _fail(result, "BUILD_INVALID", f"Build {build_id} has been disabled by an administrator.",
               lic, claimed_domain, project, build_id, ip, t0)
         return result
     if build["status"] != "completed":
-        _fail(result, "BUILD_INVALID", "This build is not finalized yet.",
+        _fail(result, "BUILD_INVALID",
+              f"Build {build_id} is not finalized yet (status={build['status']}). Wait for it to finish, then retry.",
               lic, claimed_domain, project, build_id, ip, t0)
         return result
     ver_row = db.q1("SELECT * FROM project_versions WHERE id = ?", (build["version_id"],)) if build["version_id"] else None

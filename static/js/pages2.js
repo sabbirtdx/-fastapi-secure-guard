@@ -558,7 +558,7 @@ async function bindLicenses(p, isAdmin) {
         message: "This key is shown only once. It is stored server-side as a hash.",
         body: `<div class="keyline"><div class="code">${esc(key)}</div>
           <button class="btn" id="copyKey">${I.check} Copy</button></div>
-          <div class="callout">Give this key to the deployer. They enter it at /guard/activate on the authorized domain.</div>`,
+          <div class="callout">Give this key to the deployer. They enter it at <span class="mono">/guard/activate.php</span> on the authorized domain.</div>`,
         actions: [{ label: "Done", kind: "primary", onClick: () => { closeModals(); load(); router(); } }],
       });
       qs("#copyKey") && (qs("#copyKey").onclick = async () => {

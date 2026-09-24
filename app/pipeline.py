@@ -499,8 +499,22 @@ def license_binding(ctx: BuildContext) -> None:
                 (lic["id"],))):
             domains.add(d["domain"])
     settings = db.get_settings()
+    # Empty license_server used to ship broken packages (runtime then returned
+    # BUILD_INVALID on every activation). Fail the build early instead.
+    server = (settings.get("license_server_url") or "").strip().rstrip("/")
+    if not server:
+        import os as _os
+        server = (_os.environ.get("SFG_PUBLIC_URL") or _os.environ.get("SFG_LICENSE_SERVER_URL")
+                  or "").strip().rstrip("/")
+    if not server:
+        raise StageError(
+            9,
+            "Settings → License server URL is empty. Set it to this app's public HTTPS origin "
+            "(e.g. https://your-app.onrender.com), save, then rebuild.")
+    if not server.startswith(("http://", "https://")):
+        raise StageError(9, f"License server URL must start with https:// (got: {server[:80]})")
     ctx.cfg_json = {
-        "license_server": (settings.get("license_server_url") or "").rstrip("/"),
+        "license_server": server,
         "project": ctx.project_id,
         "build": ctx.build_id,
         "version": ctx.version,

@@ -150,13 +150,14 @@ git push -u origin main
 | Build fails on package wheel | Pin versions already in `requirements.txt` (no `uvicorn[standard]` extras — those need compilers on some runtimes) |
 | `ADDRESS already in use` / boot timeout | Start command must use `$PORT`, not hard-coded `8000` |
 | UI shows “Page not found” on many menus | Hard-refresh with Ctrl+Shift+R (cache). If it persists, open browser Console → look for `SFG page modules failed to load` and paste that line |
-| UI shows **UNAUTHORIZED — Authentication required** | Session cookie missing/expired (common after Render redeploy wipes `sessions`). Sign in again with `SFG_ADMIN_EMAIL` / `SFG_ADMIN_PASSWORD`. SPA now auto-redirects to login on 401; sessions slide on activity. Hard-refresh with Ctrl+Shift+R after deploy (`?v=5`) |
+| UI shows **UNAUTHORIZED — Authentication required** | Session cookie missing/expired (common after Render redeploy wipes `sessions`). Sign in again with `SFG_ADMIN_EMAIL` / `SFG_ADMIN_PASSWORD`. SPA now auto-redirects to login on 401; sessions slide on activity. Hard-refresh with Ctrl+Shift+R after deploy (`?v=6`) |
 | Login fails after redeploy (Render free) | Ephemeral disk wiped DB → env password re-seeds empty DB on next boot; log in again with same env credentials; restore backup.json for projects/licenses |
 | Build fails: `FileNotFoundError` / `unexpected: … No such file` | Source ZIP wiped with the disk — metadata backup has no file contents. Open the project → **re-upload ZIP** → rebuild. Restore now also skips index rows whose files are absent on disk |
 | Upload fails (413 / timeout) | Lower ZIP size; set `SFG_MAX_UPLOAD_MB=50`; zip only source files |
 | Scan failed after upload | Project → Scan → Rescan; check Logs for the exception |
 | 500 on upload | Free plans often cap body size; raise plan or lower `SFG_MAX_UPLOAD_MB` |
 | Package verify fails from customer site | Set **License server URL** to the exact public HTTPS origin |
+| Customer site shows **BUILD_INVALID: This build is invalid…** | Cause: empty License server URL in an old package, or build missing/`completed` status lost after disk wipe. **Fix:** Settings → License server URL → Save → rebuild package → re-download ZIP → re-upload to host → open `/guard/activate.php`. Check Builds tab shows status `completed` for the package's build id. After redeploy: restore `backup.json` so builds/licenses return |
 | Customer site shows **ProFreeHost 404** after license key | Host 404 (not SFG) = POST left the package. Rebuild + re-download package (form now posts to itself; success page no longer redirects to `/`). Unzip so `guard/`, `components/`, `index.php` sit at the domain root (not inside a nested folder). Open `https://SITE/guard/activate.php` directly |
 | `credentials.txt` missing | Expected when `SFG_ADMIN_PASSWORD` is set — use the env password |
 | AI key lost after redeploy | Set `SFG_AI_API_KEY` env (synced into settings at every startup) |

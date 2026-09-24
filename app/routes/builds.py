@@ -43,7 +43,11 @@ async def list_builds(request: Request, project_id: str):
         "SELECT id, version, status, stage, stage_index, total_stages, validation_report_json, package_sha256,"
         " error, created_at, started_at, completed_at FROM builds WHERE project_id=? ORDER BY id DESC LIMIT 100",
         (project_id,)))
+    if not isinstance(rows, list):
+        rows = []
     for r in rows:
+        if not isinstance(r, dict):
+            continue
         r["validation_passed"] = None
         if r["validation_report_json"]:
             try:

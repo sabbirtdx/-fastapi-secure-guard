@@ -24,11 +24,31 @@ def _err(code: str, message: str, status: int = 402) -> JSONResponse:
 
 
 async def _json(request: Request) -> dict:
+    """Parse request body as a dict. Accepts JSON (primary) and form-urlencoded
+    (fallback for non-PHP clients). Never raises — returns {} on bad input."""
+    raw = b""
     try:
-        body = await request.json()
-        return body if isinstance(body, dict) else {}
+        raw = await request.body()
     except Exception:
         return {}
+    if not raw:
+        return {}
+    ctype = (request.headers.get("content-type") or "").lower()
+    if "application/x-www-form-urlencoded" in ctype or "multipart/form-data" in ctype:
+        try:
+            from urllib.parse import parse_qsl
+            return {k: v for k, v in parse_qsl(raw.decode("utf-8", "replace"), keep_blank_values=True)}
+        except Exception:
+            return {}
+    try:
+        body = json.loads(raw.decode("utf-8"))
+        return body if isinstance(body, dict) else {}
+    except Exception:
+        try:
+            body = json.loads(raw)
+            return body if isinstance(body, dict) else {}
+        except Exception:
+            return {}
 
 
 @router.post("/licenses/verify")
@@ -37,11 +57,16 @@ async def verify(request: Request):
     if not rate_verify.check(f"verify|{ip}", *config.RATE_VERIFY):
         raise_rate_limited()
     body = await _json(request)
-    result = licensing.verify_request(body, ip)
-    if not result["ok"]:
-        return _err(result["error_code"], result["error_msg"],
-                    404 if result["error_code"] == "LICENSE_INVALID" else 403)
-    return {"ok": True, "token": result["token"], "expires_at": int(time.time()) + config.AUTHZ_TOKEN_TTL_SECONDS}
+    try:
+        result = licensing.verify_request(body if isinstance(body, dict) else {}, ip)
+    except Exception:
+        return _err("SERVER_ERROR", "Verification could not be completed.", 500)
+    if not isinstance(result, dict) or not result.get("ok"):
+        code = str((result or {}).get("error_code") or "LICENSE_INVALID")
+        msg = str((result or {}).get("error_msg") or "Verification failed.")
+        return _err(code, msg, 404 if code == "LICENSE_INVALID" else 403)
+    return {"ok": True, "token": result.get("token"),
+            "expires_at": int(time.time()) + config.AUTHZ_TOKEN_TTL_SECONDS}
 
 
 @router.post("/licenses/activate")
@@ -50,11 +75,15 @@ async def activate(request: Request):
     if not rate_activate.check(f"activate|{ip}", *config.RATE_ACTIVATE):
         raise_rate_limited()
     body = await _json(request)
-    result = licensing.activate_request(body, ip)
-    if not result["ok"]:
-        return _err(result["error_code"], result["error_msg"],
-                    404 if result["error_code"] == "LICENSE_INVALID" else 403)
-    return {"ok": True, "token": result["token"]}
+    try:
+        result = licensing.activate_request(body if isinstance(body, dict) else {}, ip)
+    except Exception:
+        return _err("SERVER_ERROR", "Activation could not be completed.", 500)
+    if not isinstance(result, dict) or not result.get("ok"):
+        code = str((result or {}).get("error_code") or "LICENSE_INVALID")
+        msg = str((result or {}).get("error_msg") or "Activation failed.")
+        return _err(code, msg, 404 if code == "LICENSE_INVALID" else 403)
+    return {"ok": True, "token": result.get("token")}
 
 
 @router.post("/licenses/status")

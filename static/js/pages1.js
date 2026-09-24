@@ -12,21 +12,22 @@ SFG.pages["/dashboard"] = async () => {
         api("GET", "/api/v1/verifications?limit=500"),
       ])
     : [];
-  const licenses = isAdmin ? extras[0].licenses : [];
-  const events = isAdmin ? extras[1].events : [];
-  const verifs = isAdmin ? extras[2].verifications : [];
+  const projectList = asList(projects, "projects");
+  const licenses = isAdmin ? asList(extras[0], "licenses") : [];
+  const events = isAdmin ? asList(extras[1], "events") : [];
+  const verifs = isAdmin ? asList(extras[2], "verifications") : [];
   const today = new Date().toISOString().slice(0, 10);
-  const todayVerifs = verifs.filter((v) => (v.created_at || "").startsWith(today));
+  const todayVerifs = verifs.filter((v) => v && (v.created_at || "").startsWith(today));
   const cnt = (arr, f) => arr.filter(f).length;
-  const active = cnt(licenses, (l) => l.status === "active");
-  const expired = cnt(licenses, (l) => l.status === "expired");
-  const revoked = cnt(licenses, (l) => l.status === "revoked");
-  const activeProjects = cnt(projects.projects, (p) => p.status === "active");
+  const active = cnt(licenses, (l) => l && l.status === "active");
+  const expired = cnt(licenses, (l) => l && l.status === "expired");
+  const revoked = cnt(licenses, (l) => l && l.status === "revoked");
+  const activeProjects = cnt(projectList, (p) => p && p.status === "active");
   const recentEvents = events.slice(0, 8);
 
   const cards = `
     <div class="grid cards-4">
-      <div class="card stat"><div class="label">Projects</div><div class="value">${projects.projects.length}</div>
+      <div class="card stat"><div class="label">Projects</div><div class="value">${projectList.length}</div>
         <div class="delta">${activeProjects} active</div><div class="ico blue">${I.folder}</div></div>
       <div class="card stat"><div class="label">Active licenses</div><div class="value">${active}</div>
         <div class="delta">${cnt(licenses, (l) => l.status === "pending")} pending</div><div class="ico green">${I.key}</div></div>
@@ -59,9 +60,9 @@ SFG.pages["/dashboard"] = async () => {
       <div class="grid cards-2" style="margin-top:16px">
         <div class="card">
           <h3>Recent projects</h3>
-          ${projects.projects.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl">
+          ${projectList.length ? `<div class="tbl-wrap" style="border:0"><table class="tbl">
             <thead><tr><th>Project</th><th>Status</th><th>Files</th><th>Licenses</th><th>Builds</th><th>Updated</th></tr></thead>
-            <tbody>${projects.projects.slice(0, 6).map(projRow).join("")}</tbody></table></div>`
+            <tbody>${projectList.slice(0, 6).map(projRow).join("")}</tbody></table></div>`
             : emptyState("folder", "No projects yet", "Create a project and upload a website to get started.",
               `<a class="btn primary" href="#/upload">${I.plus} New project</a>`)}
         </div>
@@ -82,6 +83,7 @@ SFG.pages["/dashboard"] = async () => {
 /* ================= PROJECTS LIST ================= */
 SFG.pages["/projects"] = async (r) => {
   const data = await api("GET", "/api/v1/projects?q=" + encodeURIComponent(r.params.get("q") || ""));
+  const projectList = asList(data, "projects");
   const isAdmin = ["super_admin", "admin"].includes(SFG.user.role);
   const row = (p) => `<tr>
     <td><a href="#/projects/${esc(p.id)}" class="mono" style="color:var(--accent)">${esc(p.id)}</a>
@@ -105,9 +107,9 @@ SFG.pages["/projects"] = async (r) => {
         <div class="spacer"></div>
         <a class="btn primary" href="#/upload">${I.plus} New project</a>
       </div>
-      ${data.projects.length ? `<div class="tbl-wrap"><table class="tbl">
+      ${projectList.length ? `<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Project</th><th>Status</th><th>Protection</th><th>Files</th><th>Licenses</th><th>Builds</th><th>Owner</th><th>Created</th><th></th></tr></thead>
-        <tbody>${data.projects.map(row).join("")}</tbody></table></div>`
+        <tbody>${projectList.map(row).join("")}</tbody></table></div>`
         : emptyState("folder", "No projects found", "Upload a website project (ZIP or folder) to scan, protect and license it.",
           `<a class="btn primary" href="#/upload">${I.upload} Upload a project</a>`)}
       <div id="projActions"></div>`,
@@ -134,7 +136,7 @@ SFG.pages["/projects"] = async (r) => {
 /* ================= UPLOAD WIZARD ================= */
 SFG.pages["/upload"] = async () => {
   const projects = await api("GET", "/api/v1/projects?mine=true");
-  const list = projects.projects.filter((p) => p.status === "active");
+  const list = asList(projects, "projects").filter((p) => p && p.status === "active");
   return {
     title: "Upload project",
     html: `

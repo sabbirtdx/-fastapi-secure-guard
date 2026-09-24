@@ -110,12 +110,14 @@ SFG.pages["/builds/:id"] = async (r) => {
 SFG.pages["/builds"] = async () => {
   const projects = await api("GET", "/api/v1/projects");
   const isAdmin = ["super_admin", "admin"].includes(SFG.user.role);
-  const myProjects = isAdmin ? projects.projects : projects.projects.filter((p) => p.owner_id === SFG.user.id);
+  const allProjects = asList(projects, "projects");
+  const myProjects = isAdmin ? allProjects : allProjects.filter((p) => p && p.owner_id === SFG.user.id);
   const all = [];
   for (const p of myProjects) {
+    if (!p || !p.id) continue;
     try {
       const d = await api("GET", `/api/v1/projects/${p.id}/builds`);
-      d.builds.forEach((b) => all.push({ ...b, project_id: p.id, project_name: p.name }));
+      asList(d, "builds").forEach((b) => all.push({ ...b, project_id: p.id, project_name: p.name }));
     } catch (e) { }
   }
   all.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
@@ -501,8 +503,10 @@ SFG.pages["/users"] = async () => {
 /* ================= AI ANALYSIS (cross-project) ================= */
 SFG.pages["/ai"] = async () => {
   const projects = await api("GET", "/api/v1/projects");
+  const projectList = asList(projects, "projects");
   const withAnalysis = [];
-  for (const p of projects) {
+  for (const p of projectList) {
+    if (!p || !p.id) continue;
     try {
       const d = await api("GET", `/api/v1/projects/${p.id}/ai-analysis`);
       if (d.latest) withAnalysis.push({ project: p, latest: d.latest });
@@ -536,7 +540,7 @@ SFG.pages["/ai"] = async () => {
       ${withAnalysis.length ? `<div class="grid cards-2">${withAnalysis.map(card).join("")}</div>`
         : emptyState("brain", "No analyses yet", "Open a project's AI Analysis tab and run the analysis.",
           `<a class="btn primary" href="#/projects">Go to projects</a>`)}
-      ${projects.length ? "" : emptyState("folder", "No projects", "Upload a project first.",
+      ${projectList.length ? "" : emptyState("folder", "No projects", "Upload a project first.",
         `<a class="btn primary" href="#/upload">Upload</a>`)}
       <div class="grid cards-2" style="margin-top:16px">
         <div class="card"><h3>Engine input (LLM mode)</h3>
@@ -673,8 +677,9 @@ SFG.pages["/audit"] = async (r) => {
 SFG.pages["/versions"] = async () => {
   const projects = await api("GET", "/api/v1/projects");
   const rows = [];
-  for (const p of projects) {
-    for (const v of p.versions || []) rows.push({ ...v, project_id: p.id, project_name: p.name });
+  for (const p of asList(projects, "projects")) {
+    if (!p || !p.id) continue;
+    for (const v of asList(p, "versions")) rows.push({ ...v, project_id: p.id, project_name: p.name });
   }
   const row = (v) => `<tr>
     <td class="mono small">${esc(v.project_id)}<div class="faint">${esc(v.project_name || "")}</div></td>

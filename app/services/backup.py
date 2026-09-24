@@ -97,10 +97,14 @@ def _restore_rows(data: dict, bundle: dict, actor: dict) -> dict:
     with db.db() as c:
         for table in ("projects", "project_files", "project_versions", "builds",
                       "licenses", "license_domains", "security_events", "audit_logs"):
-            rows = data.get(table, [])
+            rows = data.get(table) or []
+            if not isinstance(rows, list):
+                rows = []
             n = 0
             if table == "projects":
                 for r in rows:
+                    if not isinstance(r, dict):
+                        continue
                     c.execute("INSERT OR IGNORE INTO projects (id, name, owner_id, status, protection_level,"
                               " created_at, updated_at, archived_at) VALUES (?,?,?,?,?,?,?,?)",
                               (r["id"], r["name"], r["owner_id"], r["status"], r["protection_level"],

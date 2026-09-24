@@ -406,15 +406,45 @@ final class SFG
             'ts' => time(),
             'nonce' => bin2hex(random_bytes(8)),
         ];
-        $resp = self::http('POST', $server . '/api/v1/public/licenses/verify', $body, []);
+        $url = $server . '/api/v1/public/licenses/verify';
+        $resp = self::http('POST', $url, $body, []);
         if ($resp['status'] === 200 && is_array($resp['json'])) {
-            return ['ok' => true, 'token' => (string) ($resp['json']['token'] ?? '')];
+            $token = (string) ($resp['json']['token'] ?? '');
+            if ($token !== '' && !empty($resp['json']['ok'])) {
+                return ['ok' => true, 'token' => $token];
+            }
         }
-        $err = is_array($resp['json']) ? (array) ($resp['json']['error'] ?? []) : [];
+        // Structured JSON error from the licensing API (LICENSE_INVALID → 404, etc.)
+        if (is_array($resp['json']) && is_array($resp['json']['error'] ?? null)) {
+            $err = (array) $resp['json']['error'];
+            return [
+                'ok' => false,
+                'code' => (string) ($err['code'] ?? 'SERVER_UNAVAILABLE'),
+                'message' => (string) ($err['message'] ?? 'Verification failed.'),
+            ];
+        }
+        // status 0: timeout / DNS / TLS failure — network problem, not a license decision
+        if ($resp['status'] === 0) {
+            return [
+                'ok' => false,
+                'code' => 'SERVER_UNAVAILABLE',
+                'message' => 'Could not reach the licensing server (timeout or network error).',
+            ];
+        }
+        // HTML or non-JSON body: reverse-proxy 404, wrong path, SPA catch-all, etc.
+        // Never treat this as a license denial — it is a server reachability problem.
+        if ($resp['status'] === 404 || $resp['status'] === 405 || $resp['status'] >= 500) {
+            return [
+                'ok' => false,
+                'code' => 'SERVER_UNAVAILABLE',
+                'message' => 'Licensing endpoint returned HTTP ' . $resp['status']
+                    . ' (check license_server URL points at the FastAPI host, not a PHP path).',
+            ];
+        }
         return [
             'ok' => false,
-            'code' => (string) ($err['code'] ?? 'SERVER_UNAVAILABLE'),
-            'message' => (string) ($err['message'] ?? 'Verification failed.'),
+            'code' => 'SERVER_UNAVAILABLE',
+            'message' => 'Verification failed (HTTP ' . $resp['status'] . ').',
         ];
     }
 

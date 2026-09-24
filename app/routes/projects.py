@@ -71,7 +71,11 @@ async def list_projects(request: Request, q: str = Query(default=""), mine: bool
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY updated_at DESC LIMIT 200"
     rows = db.rows_to_list(db.qall(sql, tuple(args)))
+    if not isinstance(rows, list):
+        rows = []
     for r in rows:
+        if not isinstance(r, dict):
+            continue
         r["file_count"] = db.qvalue("SELECT COUNT(*) FROM project_files WHERE project_id=?", (r["id"],))
         r["license_count"] = db.qvalue("SELECT COUNT(*) FROM licenses WHERE project_id=?", (r["id"],))
         r["build_count"] = db.qvalue("SELECT COUNT(*) FROM builds WHERE project_id=? AND status='completed'", (r["id"],))

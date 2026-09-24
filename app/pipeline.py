@@ -243,9 +243,14 @@ def ai_analysis(ctx: BuildContext) -> None:
         fresh = True
     if not fresh:
         ctx.analysis = analyzer.analyze_project(ctx.project_id)
-    rec = ctx.analysis.get("recommendation", {})
-    ctx.recommended_protect: list[str] = rec.get("protected_components", [])
-    ctx.recommended_level: str = rec.get("protection_level", "standard")
+    rec = ctx.analysis.get("recommendation", {}) if isinstance(ctx.analysis, dict) else {}
+    if not isinstance(rec, dict):
+        rec = {}
+    protected = rec.get("protected_components", [])
+    if not isinstance(protected, list):
+        protected = []
+    ctx.recommended_protect: list[str] = [str(x) for x in protected if isinstance(x, (str, int, float))]
+    ctx.recommended_level: str = rec.get("protection_level", "standard") or "standard"
     Stage.message = (f"Analysis ready — recommended level '{ctx.recommended_level}', "
                      f"{len(ctx.recommended_protect)} components recommended for protection.")
 
@@ -256,13 +261,20 @@ def protection(ctx: BuildContext) -> None:
         "SELECT relpath, kind, sensitive, secret_count FROM project_files WHERE project_id=?",
         (ctx.project_id,)))
     src = config.project_dir(ctx.project_id) / "source"
-    included = {r["relpath"] for r in rows}
-    inc_user = [u for u in (ctx.opts.get("include") or []) if u in included]
-    exc_user = set(ctx.opts.get("exclude") or [])
+    included = {r["relpath"] for r in rows if isinstance(r, dict) and r.get("relpath")}
+    opts = ctx.opts if isinstance(ctx.opts, dict) else {}
+    raw_inc = opts.get("include") or []
+    raw_exc = opts.get("exclude") or []
+    if not isinstance(raw_inc, (list, tuple)):
+        raw_inc = []
+    if not isinstance(raw_exc, (list, tuple)):
+        raw_exc = []
+    inc_user = [u for u in raw_inc if isinstance(u, str) and u in included]
+    exc_user = {u for u in raw_exc if isinstance(u, str)}
     assets = set(scanner.KIND_EXTENSIONS["asset"])
     protect = []
-    for rel in ctx.recommended_protect:
-        if rel not in included:
+    for rel in ctx.recommended_protect or []:
+        if not isinstance(rel, str) or rel not in included:
             continue
         ext = Path(rel).suffix.lower()
         if ext in assets:

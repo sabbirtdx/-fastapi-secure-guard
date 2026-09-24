@@ -12,6 +12,13 @@ const SFG = {
 /* ---------------- helpers ---------------- */
 const qs = (sel, root = document) => root.querySelector(sel);
 const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+/** Always return a real array from an API payload (never null/undefined/object). */
+function asList(v, key) {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === "object" && key != null && Array.isArray(v[key])) return v[key];
+  if (v && typeof v === "object" && key != null && Array.isArray(v[key] || [])) return v[key] || [];
+  return [];
+}
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[c]));

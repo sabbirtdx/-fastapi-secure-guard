@@ -184,9 +184,10 @@ try:
     # 13. security events reached the platform
     ev = json.load(urllib.request.urlopen(urllib.request.Request(BASE + "/api/v1/events?limit=100",
                                                                 headers={"Cookie": f"sfg_session={ADMIN_COOKIE}"})))
-    types = {e["type"] for e in ev["events"]}
+    _evs = ev.get("events") if isinstance(ev, dict) else None
+    types = {e.get("type") for e in (_evs if isinstance(_evs, list) else []) if isinstance(e, dict)}
     check("runtime tamper events reported", "integrity_failure" in types or "authorization_failed" in types,
-          str(sorted(types))[:150])
+          str(sorted(t for t in types if t))[:150])
 
     # 14. reissue a fresh license and re-activate the deployment (revocation is terminal)
     r = urllib.request.urlopen(urllib.request.Request(

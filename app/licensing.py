@@ -124,14 +124,16 @@ def verify_request(body: dict, ip: str) -> dict:
     t0 = time.time()
     result = {"ok": False, "token": None, "error_code": "LICENSE_INVALID", "error_msg": "The license key is not valid.",
               "license_id": None, "project_id": None, "domain": None, "domain_ok": 0}
+    if not isinstance(body, dict):
+        body = {}
 
-    key = (body.get("license") or "").strip()
-    claimed_domain = (body.get("domain") or "").strip()
-    project = (body.get("project") or "").strip()
-    build_id = (body.get("build") or "").strip()
-    version = (body.get("version") or "").strip()
+    key = str(body.get("license") or "").strip()
+    claimed_domain = str(body.get("domain") or "").strip()
+    project = str(body.get("project") or "").strip()
+    build_id = str(body.get("build") or "").strip()
+    version = str(body.get("version") or "").strip()
     ts = body.get("ts")
-    nonce = body.get("nonce") or ""
+    nonce = str(body.get("nonce") or "")
 
     # replay protection: fresh timestamp + unique nonce
     try:

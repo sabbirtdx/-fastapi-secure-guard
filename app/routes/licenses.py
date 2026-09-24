@@ -96,9 +96,13 @@ async def create_license(request: Request):
     except Exception:
         days = 365
     domains_in = body.get("domains") or []
+    if not isinstance(domains_in, (list, tuple)):
+        domains_in = []
     domains = []
     allow_sub = bool(body.get("allow_subdomains"))
-    for d in domains_in[:10]:
+    for d in list(domains_in)[:10]:
+        if not isinstance(d, (str, int, float)):
+            continue
         nd = licensing.normalize_domain(str(d))
         if nd and nd not in domains:
             domains.append(nd)

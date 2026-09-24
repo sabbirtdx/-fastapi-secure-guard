@@ -193,13 +193,17 @@ check("token verifies with package public key", sig_ok)
 
 # 10. events + audit + verification logs recorded
 st, d = sreq("GET", "/api/v1/events?limit=50")
-types = [e["type"] for e in d["events"]]
+_ev = d.get("events") if isinstance(d, dict) else None
+types = [e.get("type") for e in (_ev if isinstance(_ev, list) else []) if isinstance(e, dict)]
 check("security events recorded", ("unauthorized_domain" in types) or ("invalid_license" in types), str(types)[:120])
 st, d = sreq("GET", "/api/v1/verifications?limit=50")
-check("verification logs recorded", len(d["verifications"]) >= 3, str(len(d["verifications"])))
-check("failed verifications logged", "failed" in {v["result"] for v in d["verifications"]})
+_ver = d.get("verifications") if isinstance(d, dict) else None
+_ver = _ver if isinstance(_ver, list) else []
+check("verification logs recorded", len(_ver) >= 3, str(len(_ver)))
+check("failed verifications logged", "failed" in {v.get("result") for v in _ver if isinstance(v, dict)})
 st, d = sreq("GET", "/api/v1/audit?limit=100")
-acts = {a["action"] for a in d["audit"]}
+_au = d.get("audit") if isinstance(d, dict) else None
+acts = {a.get("action") for a in (_au if isinstance(_au, list) else []) if isinstance(a, dict)}
 check("audit logged admin actions", {"login", "project_created", "build_started", "license_created"} <= acts,
       str(acts)[:150])
 
@@ -237,9 +241,11 @@ check("blocked domain rejected", r.status_code == 403, str(r.json())[:120])
 
 # 12b. version management: auto-created version row, revoke -> VERSION_NOT_ALLOWED, restore
 st, d = sreq("GET", f"/api/v1/projects/{pid}/versions")
-vers = d.get("versions", [])
-v1 = next((v for v in vers if v["version"] == "1.0"), None)
-check("build version auto-registered", v1 is not None and v1["builds"] >= 1, str(vers)[:150])
+vers = d.get("versions") if isinstance(d, dict) else None
+if not isinstance(vers, list):
+    vers = []
+v1 = next((v for v in vers if isinstance(v, dict) and v.get("version") == "1.0"), None)
+check("build version auto-registered", v1 is not None and (v1.get("builds") or 0) >= 1, str(vers)[:150])
 r = client.post("/api/v1/public/versions/verify",
                 json={"license": LIC_KEY, "version": "1.0"})
 check("version 1.0 verifies pre-revocation", r.status_code == 200 and r.json().get("ok") is True, str(r.json())[:120])
@@ -310,7 +316,11 @@ devcsrf = r.json()["csrf"]
 r = dc.get("/api/v1/events")
 check("dev cannot read events", r.status_code == 403, str(r.status_code))
 r = dc.get("/api/v1/projects?q=")
-check("dev sees only own projects", all(p["owner_id"] != 1 for p in r.json()["projects"]))
+_proj_rows = r.json().get("projects") if isinstance(r.json(), dict) else None
+if not isinstance(_proj_rows, list):
+    _proj_rows = []
+check("dev sees only own projects", all(
+    isinstance(p, dict) and p.get("owner_id") != 1 for p in _proj_rows), str(len(_proj_rows)))
 r = dc.post("/api/v1/projects", json={"name": "Dev Project"}, headers={"X-CSRF-Token": devcsrf})
 check("dev creates own project", r.status_code == 200)
 r = dc.get(f"/api/v1/projects/{pid}/files")

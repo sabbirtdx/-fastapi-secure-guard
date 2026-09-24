@@ -734,8 +734,17 @@ SFG.pages["/versions"] = async () => {
 
 /* ================= SETTINGS ================= */
 SFG.pages["/settings"] = async () => {
-  const d = await api("GET", "/api/v1/settings");
-  const s = d.settings || {};
+  let s = {};
+  try {
+    const d = await api("GET", "/api/v1/settings");
+    s = (d && d.settings) || {};
+  } catch (e) {
+    return {
+      title: "Settings",
+      html: `<div class="card">${errBox(e)}</div>
+        <div class="callout blue" style="margin-top:12px">Settings require an admin account. Log in with ${esc(SFG.user?.email || "admin")} if your role is admin/super_admin.</div>`,
+    };
+  }
   const field = (key, label, type = "text", placeholder = "") => `
     <label class="f">${label}</label>
     <input class="input mono" data-set="${key}" type="${type}" value="${esc(s[key] ?? "")}" placeholder="${placeholder}">`;

@@ -179,31 +179,46 @@ function badge(cls, label) {
 }
 
 function errBox(err) {
-  return `<div class="callout red"><strong>${esc(err.code || "ERROR")}</strong> — ${esc(err.message || "Request failed")}</div>`;
+  const code = (err && err.code) || "ERROR";
+  const msg = (err && err.message) || "Request failed";
+  return `<div class="callout red"><strong>${esc(code)}</strong> — ${esc(msg)}</div>`;
 }
 
 /* ---------------- routing ---------------- */
 function nav(hash) { location.hash = hash; }
 
 function parseRoute() {
-  const h = location.hash.replace(/^#/, "") || "/dashboard";
-  const [path, query] = h.split("?");
+  let h = location.hash.replace(/^#/, "") || "/dashboard";
+  const qi = h.indexOf("?");
+  const query = qi >= 0 ? h.slice(qi + 1) : "";
+  let path = qi >= 0 ? h.slice(0, qi) : h;
+  path = path.replace(/\/+$/, "");
+  if (!path) path = "/dashboard";
+  if (path[0] !== "/") path = "/" + path;
+  path = path.replace(/\/{2,}/g, "/");
   const params = new URLSearchParams(query || "");
   const parts = path.split("/").filter(Boolean);
-  return { path: "/" + parts.join("/"), parts, params };
+  return { path: parts.length ? "/" + parts.join("/") : "/", parts, params };
 }
 
 async function router() {
   const r = parseRoute();
   SFG.route = r;
-  const page = SFG.pages[r.path] || (r.parts[0] === "projects" && r.parts[1] ? SFG.pages["/projects/:id"] : null)
-    || (r.parts[0] === "builds" && r.parts[1] ? SFG.pages["/builds/:id"] : null);
+  let page = SFG.pages[r.path];
+  if (!page && r.parts.length >= 2 && r.parts[0] === "projects") page = SFG.pages["/projects/:id"];
+  if (!page && r.parts.length >= 2 && r.parts[0] === "builds") page = SFG.pages["/builds/:id"];
+  if (!page && r.path === "/") page = SFG.pages["/dashboard"];
   const content = qs(".content");
   const titleEl = qs(".topbar h1");
   if (!content || !titleEl) return; // shell not rendered (login page)
   if (!page) {
-    content.innerHTML = emptyState("alert", "Page not found", "The page you requested does not exist.",
-      `<button class="btn" onclick="location.hash='#/dashboard'">Back to dashboard</button>`);
+    const known = Object.keys(SFG.pages).sort().join(", ");
+    const hint = known.split(", ").length < 5
+      ? `Page scripts failed to load. Registered only: ${known}. Hard-refresh (Ctrl+Shift+R) or clear cache.`
+      : `No handler for ${r.path}. Registered: ${known}`;
+    content.innerHTML = emptyState("alert", "Page not found", hint,
+      `<button class="btn" onclick="location.hash='#/dashboard'">Back to dashboard</button>
+       <button class="btn ghost" onclick="location.reload()">Reload app</button>`);
     titleEl.textContent = "Not found";
     return;
   }
@@ -211,10 +226,17 @@ async function router() {
     content.innerHTML = `<div class="loading-row"><span class="spinner"></span>Loading…</div>`;
     const out = await page(r);
     if (out && out.title) titleEl.textContent = out.title;
-    content.innerHTML = out.html || "";
-    if (out.onReady) out.onReady();
+    content.innerHTML = (out && out.html) || "";
+    if (out && out.onReady) out.onReady();
   } catch (e) {
-    content.innerHTML = `<div class="card">${errBox(e)}</div>`;
+    const back = e.status === 401
+      ? `<button class="btn" id="reloginBtn">Sign in again</button>`
+      : `<button class="btn" onclick="location.hash='#/dashboard'">Back to dashboard</button>`;
+    content.innerHTML = `<div class="card">${errBox(e)}<div style="margin-top:12px">${back}</div></div>`;
+    if (e.status === 401) {
+      const b = qs("#reloginBtn");
+      if (b) b.onclick = () => { SFG.user = null; SFG.csrf = ""; location.hash = "#/login"; loginPage(); };
+    }
   }
 }
 
@@ -333,6 +355,11 @@ async function loginPage() {
 /* ---------------- boot ---------------- */
 async function boot() {
   SFG.pages["/login"] = loginPage;
+  const expected = ["/dashboard", "/projects", "/upload", "/projects/:id", "/builds", "/licenses", "/settings"];
+  const missing = expected.filter((k) => !SFG.pages[k]);
+  if (missing.length) {
+    console.error("SFG page modules failed to load. Missing:", missing, "Registered:", Object.keys(SFG.pages));
+  }
   try {
     const me = await api("GET", "/api/v1/auth/me");
     SFG.user = me.user; SFG.csrf = me.csrf;

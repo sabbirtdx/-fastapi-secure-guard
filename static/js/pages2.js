@@ -27,7 +27,8 @@ SFG.pages["/projects/:id"] = async (r) => {
     domains: () => tabDomains(p, isAdmin),
     events: () => tabEvents(p, isAdmin),
   };
-  const body = await loaders[tab]();
+  const loadTab = loaders[tab] || loaders.overview;
+  const body = await loadTab();
 
   return {
     title: p.name,
@@ -60,6 +61,7 @@ SFG.pages["/projects/:id"] = async (r) => {
         });
       };
       bindOverview(p, isAdmin);
+      bindFiles(p);
       bindScan(p);
       bindAI(p);
       bindProtection(p);
@@ -115,6 +117,42 @@ function tabOverview(p, isAdmin) {
 
 function tabFiles(p) {
   return `<div id="filesWrap"><div class="loading-row"><span class="spinner"></span>Loading file index…</div></div>`;
+}
+
+async function bindFiles(p) {
+  const wrap = qs("#filesWrap");
+  if (!wrap) return;
+  try {
+    const d = await api("GET", `/api/v1/projects/${p.id}/files`);
+    const files = asList(d, "files");
+    const summary = asList(d, "summary");
+    if (!files.length) {
+      wrap.innerHTML = emptyState("file", "No files indexed", "Upload a ZIP or folder to build the file index.",
+        `<a class="btn primary" href="#/upload">Upload files</a>`);
+      return;
+    }
+    const sumCards = summary.map((s) =>
+      `<div class="item"><div class="k">${esc(s.kind || "other")}</div><div class="v">${s.c ?? s.count ?? 0}</div></div>`).join("");
+    wrap.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <h3 style="margin:0">File index</h3>
+          <span class="muted small">${files.length} files · ${fmtBytes(files.reduce((n, f) => n + (f.size || 0), 0))}</span>
+        </div>
+        <div class="detail-grid" style="margin-top:12px">${sumCards}</div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Path</th><th>Kind</th><th>Size</th><th>Sensitive</th></tr></thead>
+        <tbody>${files.slice(0, 2000).map((f) => `<tr>
+          <td class="mono small" style="word-break:break-all">${esc(f.relpath)}</td>
+          <td class="muted small">${esc(f.kind || "—")}</td>
+          <td class="num small">${fmtBytes(f.size)}</td>
+          <td>${f.sensitive ? badge("warn", `${f.secret_count || 0} secret(s)`) : badge("muted", "no")}</td>
+        </tr>`).join("")}</tbody></table></div>
+      ${files.length > 2000 ? `<div class="faint small" style="margin-top:8px">Showing first 2000 of ${files.length} files.</div>` : ""}`;
+  } catch (e) {
+    wrap.innerHTML = errBox(e);
+  }
 }
 
 function tabScan(p) {

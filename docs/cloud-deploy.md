@@ -37,7 +37,8 @@ git config --global user.name "Your Name"
 git config --global user.email "you@example.com"
 
 git init
-git add .
+git add -A
+git status --short   # must show app/, static/, requirements.txt, runtime.txt, Procfile, render.yaml
 git commit -m "Secure File Guard initial deploy"
 
 # Create an empty repo on GitHub, then:
@@ -144,9 +145,11 @@ git push -u origin main
 
 | Symptom | Fix |
 |---------|-----|
-| Build fails on pip | Confirm `requirements.txt` is at repo root; set env `PYTHON_VERSION=3.12.8`; Build Command: `pip install --upgrade pip && pip install -r requirements.txt` |
-| Build fails / empty repo | Push from project root (`git status` must show `app/`, `requirements.txt`, `Procfile`) |
+| Build fails on pip | Confirm `requirements.txt` + `runtime.txt` are at repo root; Build Command: `python -m pip install --upgrade pip && python -m pip install -r requirements.txt` |
+| Build fails / empty repo | Push from project root (`git status` must show `app/`, `static/`, `requirements.txt`, `runtime.txt`, `Procfile`, `render.yaml`) |
+| Build fails on package wheel | Pin versions already in `requirements.txt` (no `uvicorn[standard]` extras — those need compilers on some runtimes) |
 | `ADDRESS already in use` / boot timeout | Start command must use `$PORT`, not hard-coded `8000` |
+| UI shows “Page not found” on many menus | Hard-refresh with Ctrl+Shift+R (cache). If it persists, open browser Console → look for `SFG page modules failed to load` and paste that line |
 | Login fails after redeploy (Render free) | Ephemeral disk wiped DB → env password re-seeds empty DB on next boot; log in again with same env credentials; restore backup.json for projects/licenses |
 | Upload fails (413 / timeout) | Lower ZIP size; set `SFG_MAX_UPLOAD_MB=50`; zip only source files |
 | Scan failed after upload | Project → Scan → Rescan; check Logs for the exception |

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Secrets & runtime data — never commit
+data/
+*.db
+*.db-wal
+*.db-shm
+credentials.txt
+
+# Local / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Test artifacts
+/tmp/
+tests/last_run.json
